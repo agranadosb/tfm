@@ -17,14 +17,20 @@ class Puzzle8MnistGenerator:
 
     def __init__(self, train: bool = True):
         self.train = train
+        self.transformation = transforms.ToTensor()
         self.dataset = torchvision.datasets.MNIST(
-            root="./data", train=train, download=True, transform=transforms.ToTensor()
+            root="./data", train=train, download=True
         )
+
         self.indices = {index: [] for index in range(10)}
         for index in range(len(self.dataset)):
             _, digit = self.dataset[index]
             self.indices[digit].append(index)
-        del self.indices[9]
+
+        # Indices to numpy for fast access to indices
+        for digit, digit_indices in self.indices.items():
+            self.indices[digit] = np.asarray(digit_indices)
+
         self.base_image = torch.zeros((28 * 3, 28 * 3))
 
     def _get(self, indices: List[int]) -> Tuple[torch.Tensor, List[int]]:
@@ -48,7 +54,10 @@ class Puzzle8MnistGenerator:
                 ymax = ymin + 28
                 xmax = xmin + 28
                 index = row * 3 + column
+
                 image, digit = self.dataset[indices[index]]
+                image = self.transformation(image)
+
                 digits[index] = digit
                 self.base_image[xmin:xmax, ymin:ymax] = image
 
@@ -74,7 +83,7 @@ class Puzzle8MnistGenerator:
         empty_sequence = sequence is None
         if empty_sequence:
             sequence = range(9)
-        digits_selection = [random.choice(self.indices[digit]) for digit in sequence]
+        digits_selection = [np.random.choice(self.indices[digit]) for digit in sequence]
 
         if not ordered and empty_sequence:
             random.shuffle(digits_selection)
