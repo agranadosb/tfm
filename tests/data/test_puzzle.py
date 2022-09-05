@@ -31,3 +31,19 @@ class TestGet(TestCase):
         puzzle, order = self.generator.get(ordered=ordered)
 
         self.assertEqual(sum(order), sum(list(range(9))))
+
+    def test_get_ordered_sequence_puzzle(self):
+        sequence = [0, 1, 4, 2, 3, 5, 6, 7, 8]
+        ordered = True
+
+        puzzle, order = self.generator.get(ordered=ordered, sequence=sequence)
+
+        self.assertListEqual(list(sorted(order)), list(range(9)))
+
+    def test_get_unordered_sequence_puzzle(self):
+        sequence = [0, 1, 4, 2, 3, 5, 6, 7, 8]
+        ordered = False
+
+        puzzle, order = self.generator.get(ordered=ordered, sequence=sequence)
+
+        self.assertListEqual(order, sequence)
