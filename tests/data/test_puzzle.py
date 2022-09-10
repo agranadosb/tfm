@@ -47,3 +47,18 @@ class TestGet(TestCase):
         puzzle, order = self.generator.get(ordered=ordered, sequence=sequence)
 
         self.assertListEqual(order, sequence)
+
+    def test_get_custom_order(self):
+        order = [1, 2, 3, 8, 0, 4, 7, 6, 5]
+        ordered = True
+        generator = Puzzle8MnistGenerator(order=order)
+
+        puzzle, order = generator.get(ordered=ordered)
+
+        self.assertListEqual(order, order)
+
+    def test_get_incorrect_custom_order(self):
+        order = [1, 2, 3, 8, 0, 4, 7, 6, 4]
+
+        with self.assertRaises(ValueError):
+            Puzzle8MnistGenerator(order=order)

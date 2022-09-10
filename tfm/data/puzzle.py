@@ -6,6 +6,9 @@ import torch
 import torchvision
 from torchvision import transforms
 
+from tfm.constants import ORDERED_ORDER
+from tfm.utils.puzzle import has_correct_order
+
 
 class Puzzle8MnistGenerator:
     """This class generates a random 8.puzzle based on mnist digits.
@@ -13,14 +16,25 @@ class Puzzle8MnistGenerator:
     Parameters
     ----------
     train: bool = True
-        Indicates if the split of the dataset if for training or not."""
+        Indicates if the split of the dataset if for training or not.
+    order: List[int] = tuple(range(9))
+        Default order on the grid. The default order is:
+        ```
+        0 1 2
+        3 4 5
+        6 7 8
+        ```"""
 
-    def __init__(self, train: bool = True):
+    def __init__(self, train: bool = True, order: List[int] = ORDERED_ORDER):
         self.train = train
         self.transformation = transforms.ToTensor()
         self.dataset = torchvision.datasets.MNIST(
             root="./data", train=train, download=True
         )
+        self.order = order
+
+        if not has_correct_order(order):
+            raise ValueError("The list must have only the next values")
 
         self.indices = {index: [] for index in range(10)}
         for index in range(len(self.dataset)):
@@ -82,7 +96,7 @@ class Puzzle8MnistGenerator:
             Order of the digits on the mnist puzzle."""
         empty_sequence = sequence is None
         if empty_sequence:
-            sequence = range(9)
+            sequence = self.order
         digits_selection = [np.random.choice(self.indices[digit]) for digit in sequence]
 
         if not ordered and empty_sequence:
