@@ -97,13 +97,30 @@ class Puzzle8MnistGenerator:
     def _random_movements(
         self, total_movements: int = 20
     ) -> Tuple[np.ndarray, np.ndarray]:
+        """Generate a random list of movements and returns the list of
+        movements with the result of the application of these movements to the
+        ordered puzzle.
+
+        Parameters
+        ----------
+        total_movements: int = 20
+            Total of movements to perform.
+
+        Returns
+        -------
+        Tuple[np.ndarray, np.ndarray]
+            Result of the application of these movements to the ordered puzzle.
+            List of movements being:
+                 - 3 -> Up
+                 - -3 -> Bottom
+                 - 1 -> Right
+                 - -1 -> Left"""
         current_index = self.order.index(0)
         current_order = np.asarray(self.order)
-        choice = np.random.choice
 
         movements = np.zeros(total_movements)
         available_movements = np.asarray(MOVEMENTS)
-        selected_movements = choice(available_movements, total_movements)
+        selected_movements = np.random.choice(available_movements, total_movements)
         for i, movement in enumerate(selected_movements):
             new_index = current_index + movement
 
