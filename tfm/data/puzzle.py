@@ -7,7 +7,7 @@ from torchvision import transforms
 
 from tfm.constants import ORDERED_ORDER, MOVEMENTS
 from tfm.utils.data import to_numpy
-from tfm.utils.puzzle import has_correct_order
+from tfm.utils.puzzle import has_correct_order, is_solvable
 
 
 class Puzzle8MnistGenerator:
@@ -96,18 +96,17 @@ class Puzzle8MnistGenerator:
             new_index = current_index + movement
 
             beyond_bounds = new_index < 0 or new_index > 8
-            incorrect_left = movement % 3 == 0 and movement == -1
-            incorrect_right = movement % 3 == 2 and movement == 1
+            incorrect_left = current_index % 3 == 0 and movement == -1
+            incorrect_right = current_index % 3 == 2 and movement == 1
 
             if beyond_bounds or incorrect_left or incorrect_right:
-                movement = -movement
+                movement = -1 * movement
                 new_index = current_index + movement
 
             movements[i] = movement
-            current_order[new_index], current_order[current_index] = (
-                current_order[current_index],
-                current_order[new_index],
-            )
+            previous_value = current_order[new_index]
+            current_order[new_index] = 0
+            current_order[current_index] = previous_value
             current_index = new_index
 
         return current_order, movements
@@ -169,6 +168,7 @@ class Puzzle8MnistGenerator:
 
         if not ordered and empty_sequence:
             sequence = self._random_movements()[0]
+            assert is_solvable(sequence, self.order)
 
         digits_selection = np.zeros(len(sequence), dtype=np.int16)
         for index, digit in enumerate(sequence):

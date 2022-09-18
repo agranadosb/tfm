@@ -4,6 +4,7 @@ import numpy as np
 import torch
 
 from tfm.data.puzzle import Puzzle8MnistGenerator
+from tfm.utils.puzzle import is_solvable
 
 
 class TestPuzzle8MnistGenerator(TestCase):
@@ -92,7 +93,10 @@ class TestPuzzle8MnistGenerator(TestCase):
         order = [1, 2, 3, 8, 0, 4, 7, 6, 5]
         puzzle = Puzzle8MnistGenerator(order=order)
 
-        sequence_result, movements_result = puzzle._random_movements()
+        np.random.seed(7)
+        for _ in range(50):
+            sequence_result, movements_result = puzzle._random_movements()
 
-        self.assertEqual(sum(sequence_result), sum(list(range(9))))
-        self.assertIn(4 + sum(movements_result), list(range(9)))
+            self.assertEqual(sum(sequence_result), sum(list(range(9))))
+            self.assertIn(4 + sum(movements_result), list(range(9)))
+            self.assertTrue(is_solvable(sequence_result, order))
