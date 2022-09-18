@@ -6,6 +6,7 @@ import torchvision
 from torchvision import transforms
 
 from tfm.constants import ORDERED_ORDER, MOVEMENTS
+from tfm.utils.data import to_numpy
 from tfm.utils.puzzle import has_correct_order
 
 
@@ -38,9 +39,7 @@ class Puzzle8MnistGenerator:
         self.dataset = torchvision.datasets.MNIST(
             root="./data", train=train, download=True
         )
-        if not isinstance(order, np.ndarray):
-            order = np.asarray(order)
-        self.order = order
+        self.order = to_numpy(order)
 
         if not has_correct_order(order):
             raise ValueError("The list must have only the next values")
@@ -166,8 +165,7 @@ class Puzzle8MnistGenerator:
         if empty_sequence:
             sequence = self.order
 
-        if not isinstance(sequence, np.ndarray):
-            sequence = np.asarray(sequence)
+        sequence = to_numpy(sequence)
 
         if not ordered and empty_sequence:
             sequence = self._random_movements()[0]
