@@ -5,9 +5,16 @@ import torch
 from tfm.data.puzzle import Puzzle8MnistGenerator
 
 
-class TestGet(TestCase):
+class TestPuzzle8MnistGenerator(TestCase):
     def setUp(self) -> None:
         self.generator = Puzzle8MnistGenerator()
+
+    def test___init__custom_different_digits(self):
+        different_digits = 1
+        puzzle = Puzzle8MnistGenerator(different_digits=different_digits)
+
+        for value in puzzle.indices.values():
+            self.assertEqual(different_digits, len(value))
 
     def test_get_correct_types(self):
         ordered = False
@@ -62,3 +69,12 @@ class TestGet(TestCase):
 
         with self.assertRaises(ValueError):
             Puzzle8MnistGenerator(order=order)
+
+    def test__random_movements(self):
+        order = [1, 2, 3, 8, 0, 4, 7, 6, 5]
+        puzzle = Puzzle8MnistGenerator(order=order)
+
+        sequence_result, movements_result = puzzle._random_movements()
+
+        self.assertEqual(sum(sequence_result), sum(list(range(9))))
+        self.assertIn(4 + sum(movements_result), list(range(9)))

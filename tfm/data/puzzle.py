@@ -1,12 +1,11 @@
-import random
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Union
 
 import numpy as np
 import torch
 import torchvision
 from torchvision import transforms
 
-from tfm.constants import ORDERED_ORDER
+from tfm.constants import ORDERED_ORDER, MOVEMENTS
 from tfm.utils.puzzle import has_correct_order
 
 
@@ -20,12 +19,20 @@ class Puzzle8MnistGenerator:
     order: List[int] = tuple(range(9))
         Default order on the grid. The default order is:
         ```
-        0 1 2
-        3 4 5
-        6 7 8
-        ```"""
+        1 2 3
+        8 0 4
+        7 6 5
+        ```
+    different_digits: int = 10
+        Diversity of the digits. If `different_digits` is set to 10 it means
+        that each of the digits will have 10 different shapes."""
 
-    def __init__(self, train: bool = True, order: List[int] = ORDERED_ORDER):
+    def __init__(
+        self,
+        train: bool = True,
+        order: List[int] = ORDERED_ORDER,
+        different_digits: int = 10,
+    ):
         self.train = train
         self.transformation = transforms.ToTensor()
         self.dataset = torchvision.datasets.MNIST(
@@ -36,14 +43,24 @@ class Puzzle8MnistGenerator:
         if not has_correct_order(order):
             raise ValueError("The list must have only the next values")
 
-        self.indices = {index: [] for index in range(10)}
+        self.indices = {
+            index: np.zeros(different_digits, dtype=np.int) for index in range(10)
+        }
+        index_number = {index: -1 for index in range(10)}
+        completed = np.zeros(10, dtype=np.bool)
         for index in range(len(self.dataset)):
             _, digit = self.dataset[index]
-            self.indices[digit].append(index)
 
-        # Indices to numpy for fast access to indices
-        for digit, digit_indices in self.indices.items():
-            self.indices[digit] = np.asarray(digit_indices)
+            completed[digit] = (
+                completed[digit] or index_number[digit] == different_digits - 1
+            )
+            current_digit_list_index = (index_number[digit] + 1) % different_digits
+
+            index_number[digit] = current_digit_list_index
+            self.indices[digit][current_digit_list_index] = index
+
+            if completed.all():
+                break
 
         self.base_image = torch.zeros((28 * 3, 28 * 3))
 
@@ -77,8 +94,40 @@ class Puzzle8MnistGenerator:
 
         return self.base_image, digits
 
+    def _random_movements(
+        self, total_movements: int = 20
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        current_index = self.order.index(0)
+        current_order = np.asarray(self.order)
+        choice = np.random.choice
+
+        movements = np.zeros(total_movements)
+        available_movements = np.asarray(MOVEMENTS)
+        selected_movements = choice(available_movements, total_movements)
+        for i, movement in enumerate(selected_movements):
+            new_index = current_index + movement
+
+            beyond_bounds = new_index < 0 or new_index > 8
+            incorrect_left = movement % 3 == 0 and movement == -1
+            incorrect_right = movement % 3 == 2 and movement == 1
+
+            if beyond_bounds or incorrect_left or incorrect_right:
+                movement = -movement
+                new_index = current_index + movement
+
+            movements[i] = movement
+            current_order[new_index], current_order[current_index] = (
+                current_order[current_index],
+                current_order[new_index],
+            )
+            current_index = new_index
+
+        return current_order, movements
+
     def get(
-        self, ordered: bool = False, sequence: Optional[List[int]] = None
+        self,
+        ordered: bool = False,
+        sequence: Optional[Union[List[int], np.ndarray]] = None,
     ) -> Tuple[torch.Tensor, List[int]]:
         """Returns a random generated 8-puzzle.
 
@@ -97,9 +146,10 @@ class Puzzle8MnistGenerator:
         empty_sequence = sequence is None
         if empty_sequence:
             sequence = self.order
-        digits_selection = [np.random.choice(self.indices[digit]) for digit in sequence]
 
         if not ordered and empty_sequence:
-            random.shuffle(digits_selection)
+            sequence = self._random_movements()[0]
+
+        digits_selection = [np.random.choice(self.indices[digit]) for digit in sequence]
 
         return self._get(digits_selection)
