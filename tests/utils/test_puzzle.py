@@ -46,4 +46,4 @@ class TestUtilsPuzzle(TestCase):
 
         result = is_solvable(sequence, order)
 
-        self.assertFalseTrue(result)
+        self.assertFalse(result)
