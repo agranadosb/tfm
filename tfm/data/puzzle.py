@@ -44,10 +44,10 @@ class Puzzle8MnistGenerator:
             raise ValueError("The list must have only the next values")
 
         self.indices = {
-            index: np.zeros(different_digits, dtype=np.int) for index in range(10)
+            index: np.zeros(different_digits, dtype=np.int16) for index in range(10)
         }
         index_number = {index: -1 for index in range(10)}
-        completed = np.zeros(10, dtype=np.bool)
+        completed = np.zeros(10, dtype=bool)
         for index in range(len(self.dataset)):
             _, digit = self.dataset[index]
 
