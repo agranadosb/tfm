@@ -5,6 +5,7 @@ from torchvision import transforms
 from tfm.data.puzzle import Puzzle8MnistGenerator
 
 from tfm.plots.images import plot_images
+from tfm.utils.puzzle import is_solvable
 
 if __name__ == "__main__":
     init = time.time()
@@ -20,3 +21,6 @@ if __name__ == "__main__":
     order = [1, 2, 3, 8, 0, 4, 7, 6, 5]
     sequence_result, movements_result = p._random_movements()
     print(f"Random movements: {time.time() - init}")
+    init = time.time()
+    result = is_solvable(sequence_result, order)
+    print(f"Check solvable: {time.time() - init}")
