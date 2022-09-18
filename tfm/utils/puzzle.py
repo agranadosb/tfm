@@ -27,20 +27,28 @@ def has_correct_order(order: Union[np.asarray, List[int], Tuple[int, ...]]) -> b
 def is_solvable(
     sequence: Union[np.ndarray, List[int], Tuple[int, ...]],
     order: Union[np.ndarray, List[int], Tuple[int, ...]],
-):
+) -> bool:
+    """Check if an 8-puzzle is solvable for a given order.
+
+    Parameters
+    ----------
+    sequence: Union[np.ndarray, List[int], Tuple[int, ...]]
+        Sequence of the problem or initial state.
+    order: Union[np.ndarray, List[int], Tuple[int, ...]]
+        Order of the problem or goal state.
+
+    Returns
+    -------
+    bool
+        True if the issue is solvable false otherwise."""
     sequence = to_numpy(sequence)
-    order = to_numpy(order)
-    order_indices = np.unique(order, return_index=True)[1]
+    order, order_indices = np.unique(order, return_index=True)
     sequence_indices = np.unique(sequence, return_index=True)[1]
 
-    inversion_table = np.zeros((9, 9), dtype=bool)
-
-    for digit in range(np.max(order)):
+    total = 0
+    for digit in range(np.max(order) + 1):
         on_right = order_indices > order_indices[digit]
         on_left = sequence_indices < sequence_indices[digit]
-        inversion_table[
-            digit,
-            np.logical_and(on_right, on_left),
-        ] = True
+        total += np.logical_and(on_right, on_left).sum()
 
-    return np.sum(inversion_table) % 2 == 1
+    return total % 2 == 0

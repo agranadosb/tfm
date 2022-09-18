@@ -38,7 +38,7 @@ class TestUtilsPuzzle(TestCase):
 
         result = is_solvable(sequence, order)
 
-        self.assertTrue(result)
+        self.assertFalse(result)
 
     def test_is_solvable_unsolvable_puzzle(self):
         order = [0, 1, 2, 3, 4, 5, 6, 7, 8]
@@ -46,4 +46,20 @@ class TestUtilsPuzzle(TestCase):
 
         result = is_solvable(sequence, order)
 
-        self.assertFalse(result)
+        self.assertTrue(result)
+
+    def test_is_solvable_same(self):
+        order = [1, 2, 3, 8, 0, 4, 7, 6, 5]
+        sequence = [1, 2, 3, 8, 0, 4, 7, 6, 5]
+
+        result = is_solvable(sequence, order)
+
+        self.assertTrue(result)
+
+    def test_is_solvable_solvable_puzzle_2(self):
+        order = [1, 2, 3, 8, 0, 4, 7, 6, 5]
+        sequence = [1, 2, 0, 7, 4, 3, 6, 8, 5]
+
+        result = is_solvable(sequence, order)
+
+        self.assertTrue(result)
