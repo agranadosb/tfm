@@ -1,5 +1,6 @@
 from unittest import TestCase
 
+import numpy as np
 import torch
 
 from tfm.data.puzzle import Puzzle8MnistGenerator
@@ -22,8 +23,8 @@ class TestPuzzle8MnistGenerator(TestCase):
         puzzle, order = self.generator.get(ordered=ordered)
 
         self.assertTrue(isinstance(puzzle, torch.Tensor))
-        self.assertTrue(isinstance(order, list))
-        self.assertTrue(isinstance(order[0], int))
+        self.assertTrue(isinstance(order, np.ndarray))
+        self.assertTrue(isinstance(order[0], np.int16))
 
     def test_get_ordered_puzzle(self):
         ordered = True
@@ -39,7 +40,7 @@ class TestPuzzle8MnistGenerator(TestCase):
 
         self.assertEqual(sum(order), sum(list(range(9))))
 
-    def test_get_ordered_sequence_puzzle(self):
+    def test_get_ordered_list_sequence_puzzle(self):
         sequence = [0, 1, 4, 2, 3, 5, 6, 7, 8]
         ordered = True
 
@@ -47,22 +48,39 @@ class TestPuzzle8MnistGenerator(TestCase):
 
         self.assertListEqual(list(sorted(order)), list(range(9)))
 
-    def test_get_unordered_sequence_puzzle(self):
+    def test_get_unordered_list_sequence_puzzle(self):
         sequence = [0, 1, 4, 2, 3, 5, 6, 7, 8]
+        numpy_sequence = np.asarray(sequence, dtype=np.int16)
         ordered = False
 
         puzzle, order = self.generator.get(ordered=ordered, sequence=sequence)
 
-        self.assertListEqual(order, sequence)
+        self.assertTrue(np.array_equal(numpy_sequence, order))
+
+    def test_get_ordered_sequence_puzzle(self):
+        sequence = np.asarray([0, 1, 4, 2, 3, 5, 6, 7, 8], dtype=np.int16)
+        ordered = True
+
+        puzzle, order = self.generator.get(ordered=ordered, sequence=sequence)
+
+        self.assertListEqual(list(sorted(order)), list(range(9)))
+
+    def test_get_unordered_sequence_puzzle(self):
+        sequence = np.asarray([0, 1, 4, 2, 3, 5, 6, 7, 8], dtype=np.int16)
+        ordered = False
+
+        puzzle, order = self.generator.get(ordered=ordered, sequence=sequence)
+
+        self.assertTrue(np.array_equal(np.asarray(sequence), order))
 
     def test_get_custom_order(self):
-        order = [1, 2, 3, 8, 0, 4, 7, 6, 5]
+        correct_order = [1, 2, 3, 8, 0, 4, 7, 6, 5]
         ordered = True
-        generator = Puzzle8MnistGenerator(order=order)
+        generator = Puzzle8MnistGenerator(order=correct_order)
 
         puzzle, order = generator.get(ordered=ordered)
 
-        self.assertListEqual(order, order)
+        self.assertTrue(np.array_equal(np.asarray(correct_order), order))
 
     def test_get_incorrect_custom_order(self):
         order = [1, 2, 3, 8, 0, 4, 7, 6, 4]

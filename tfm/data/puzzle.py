@@ -38,6 +38,8 @@ class Puzzle8MnistGenerator:
         self.dataset = torchvision.datasets.MNIST(
             root="./data", train=train, download=True
         )
+        if not isinstance(order, np.ndarray):
+            order = np.asarray(order)
         self.order = order
 
         if not has_correct_order(order):
@@ -64,36 +66,6 @@ class Puzzle8MnistGenerator:
 
         self.base_image = torch.zeros((28 * 3, 28 * 3))
 
-    def _get(self, indices: List[int]) -> Tuple[torch.Tensor, List[int]]:
-        """Returns the 8-puzzle wrote on 'sequence'.
-
-        Parameters
-        ----------
-        indices: List[int]
-            Indices of the digits on the dataset.
-
-        Returns
-        -------
-        Tuple[np.ndarray, List[int]]
-            8-Puzzle generated.
-            Order of the digits on the mnist puzzle."""
-        digits = [-1 for _ in range(9)]
-        for column in range(3):
-            for row in range(3):
-                ymin = column * 28
-                xmin = row * 28
-                ymax = ymin + 28
-                xmax = xmin + 28
-                index = row * 3 + column
-
-                image, digit = self.dataset[indices[index]]
-                image = self.transformation(image)
-
-                digits[index] = digit
-                self.base_image[xmin:xmax, ymin:ymax] = image
-
-        return self.base_image, digits
-
     def _random_movements(
         self, total_movements: int = 20
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -115,8 +87,8 @@ class Puzzle8MnistGenerator:
                  - -3 -> Bottom
                  - 1 -> Right
                  - -1 -> Left"""
-        current_index = self.order.index(0)
-        current_order = np.asarray(self.order)
+        current_index = np.where(self.order == 0)[0][0]
+        current_order = self.order.copy()
 
         movements = np.zeros(total_movements)
         available_movements = np.asarray(MOVEMENTS)
@@ -141,32 +113,67 @@ class Puzzle8MnistGenerator:
 
         return current_order, movements
 
+    def _get(self, indices: np.ndarray) -> Tuple[torch.Tensor, np.ndarray]:
+        """Returns the 8-puzzle wrote on 'sequence'.
+
+        Parameters
+        ----------
+        indices: np.ndarray
+            Indices of the digits on the dataset.
+
+        Returns
+        -------
+        Tuple[torch.Tensor, np.ndarray]
+            Image of the 8-Puzzle generated.
+            Order of the digits on the mnist puzzle."""
+        digits = np.zeros(9, dtype=np.int16)
+        for column in range(3):
+            for row in range(3):
+                ymin = column * 28
+                xmin = row * 28
+                ymax = ymin + 28
+                xmax = xmin + 28
+                index = row * 3 + column
+
+                image, digit = self.dataset[indices[index]]
+                image = self.transformation(image)
+
+                digits[index] = digit
+                self.base_image[xmin:xmax, ymin:ymax] = image
+
+        return self.base_image, digits
+
     def get(
         self,
         ordered: bool = False,
-        sequence: Optional[Union[List[int], np.ndarray]] = None,
-    ) -> Tuple[torch.Tensor, List[int]]:
+        sequence: Optional[Union[np.ndarray, List[int], Tuple[int, ...]]] = None,
+    ) -> Tuple[torch.Tensor, np.ndarray]:
         """Returns a random generated 8-puzzle.
 
         Parameters
         ----------
         ordered: bool = False
             If True the 8-puzzle will be ordered.
-        sequence: Optional[List[int]]
+        sequence: Optional[Union[np.ndarray, List[int], Tuple[int, ...]]]
             If given this sequence is used instead of random selected digits.
 
         Returns
         -------
-        Tuple[np.ndarray, List[int]]
-            8-Puzzle generated.
+        Tuple[torch.Tensor, np.ndarray]
+            Image of the 8-Puzzle generated.
             Order of the digits on the mnist puzzle."""
         empty_sequence = sequence is None
         if empty_sequence:
             sequence = self.order
 
+        if not isinstance(sequence, np.ndarray):
+            sequence = np.asarray(sequence)
+
         if not ordered and empty_sequence:
             sequence = self._random_movements()[0]
 
-        digits_selection = [np.random.choice(self.indices[digit]) for digit in sequence]
+        digits_selection = np.zeros(len(sequence), dtype=np.int16)
+        for index, digit in enumerate(sequence):
+            digits_selection[index] = np.random.choice(self.indices[digit])
 
         return self._get(digits_selection)

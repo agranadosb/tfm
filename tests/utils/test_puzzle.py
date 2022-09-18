@@ -31,3 +31,6 @@ class TestUtilsPuzzle(TestCase):
         result = has_correct_order(order)
 
         self.assertFalse(result)
+
+    def test_is_solvable_solvable_puzzle(self):
+        pass

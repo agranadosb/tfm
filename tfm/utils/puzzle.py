@@ -1,9 +1,13 @@
-from typing import List
+from typing import List, Union, Tuple
+
+import numpy as np
 
 from tfm.constants import ORDERED_ORDER
 
 
-def has_correct_order(order: List[int]) -> bool:
+def has_correct_order(
+    order: Union[np.asarray, List[int], Tuple[int, ...]]
+) -> bool:
     """Returns true if the `order` has values from 0 to 9 without any number
     repeated.
 
