@@ -114,7 +114,7 @@ class UnetMultiModalTrainer:
 
                     message = (
                         f"Epoch {self.current_epoch:3d}/{self.epochs:3d} "
-                        f"train loss {(total_loss / batches).item():3.5f} "
+                        f"eval loss {(total_loss / batches).item():3.5f} "
                         f"images loss {(total_images_loss / batches).item():3.5f} "
                         f"movements loss {(total_movements_loss / batches).item():3.5f}"
                     )
