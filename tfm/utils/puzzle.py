@@ -24,6 +24,45 @@ def has_correct_order(order: Union[np.asarray, List[int], Tuple[int, ...]]) -> b
     ) and len(order) == len(ORDERED_ORDER)
 
 
+def index_to_coordinates(index: int) -> Tuple[int, int]:
+    """Transforms and index of the 8-puzzle to a coordinate. In instance, if we
+    have the index 4, it corresponds to the row 1 column 1.
+
+    Parameters
+    ----------
+    index: int
+        Current index on the 8-puzzle order.
+
+    Returns
+    -------
+    Row: int
+        Row on the 8-puzzle.
+    Column: int
+        Column on the 8-puzzle."""
+    return index // 3, index % 3
+
+
+def manhattan_distance(index: int, original_index: int):
+    """Computes the Manhattan index of an 8-puzzle given the current index of a
+    digit and the position on the sorted puzzle.
+
+    Parameters
+    ----------
+    index: int
+        Current index of the digit.
+    original_index: int
+        Index that should have the digit on the sorted puzzle.
+
+    Returns
+    -------
+    distance: int
+        Manhattan distance"""
+    row, column = index_to_coordinates(index)
+    original_row, original_column = index_to_coordinates(original_index)
+
+    return np.sum(np.abs([row - original_row, column - original_column]))
+
+
 def is_solvable(
     sequence: Union[np.ndarray, List[int], Tuple[int, ...]],
     order: Union[np.ndarray, List[int], Tuple[int, ...]],
@@ -42,13 +81,23 @@ def is_solvable(
     bool
         True if the issue is solvable false otherwise."""
     sequence = to_numpy(sequence)
-    order, order_indices = np.unique(order, return_index=True)
-    sequence_indices = np.unique(sequence, return_index=True)[1]
+    order = to_numpy(order)
+    digits_to_check = len(order) - 1
+    start_digits_to_check = 1
 
     total = 0
-    for digit in range(np.max(order) + 1):
-        on_right = order_indices > order_indices[digit]
-        on_left = sequence_indices < sequence_indices[digit]
-        total += np.logical_and(on_right, on_left).sum()
+    for i in range(digits_to_check):
+        digit = order[i]
+        for j in range(start_digits_to_check, digits_to_check):
+            digit_to_check = order[j]
 
-    return total % 2 == 0
+            digit_index = np.where(sequence == digit)[0][0]
+            digit_to_check_index = np.where(sequence == digit_to_check)[0][0]
+
+            total += int((i < j) != (digit_index < digit_to_check_index))
+        start_digits_to_check += 1
+
+    zero_index = np.where(sequence == 0)[0][0]
+    original_zero_index = np.where(order == 0)[0][0]
+
+    return total % 2 == manhattan_distance(zero_index, original_zero_index)

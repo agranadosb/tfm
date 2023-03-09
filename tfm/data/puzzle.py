@@ -1,13 +1,15 @@
-from typing import List, Tuple, Optional, Union
+import random
+from typing import List, Tuple
 
 import numpy as np
 import torch
 import torchvision
+from torch.nn.functional import one_hot
 from torchvision import transforms
 
-from tfm.constants import ORDERED_ORDER, MOVEMENTS
+from tfm.constants import ORDERED_ORDER, MOVEMENTS, MOVEMENT_TO_LABEL
 from tfm.utils.data import to_numpy
-from tfm.utils.puzzle import has_correct_order, is_solvable
+from tfm.utils.puzzle import has_correct_order
 
 
 class Puzzle8MnistGenerator:
@@ -35,6 +37,7 @@ class Puzzle8MnistGenerator:
         different_digits: int = 10,
     ):
         self.train = train
+        self.size = 28 * 3
         self.transformation = transforms.ToTensor()
         self.dataset = torchvision.datasets.MNIST(
             root="./data", train=train, download=True
@@ -65,51 +68,77 @@ class Puzzle8MnistGenerator:
 
         self.base_image = torch.zeros((28 * 3, 28 * 3))
 
-    def _random_movements(
-        self, total_movements: int = 20
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Generate a random list of movements and returns the list of
-        movements with the result of the application of these movements to the
-        ordered puzzle.
+    def random_permutation(self, current_order: np.ndarray, zero_index: int) -> Tuple[int, int]:
+        """Returns a new order with one random movement from a current order.
 
         Parameters
         ----------
-        total_movements: int = 20
-            Total of movements to perform.
+        current_order: np.ndarray
+            Current order of the puzzle. This parameter will be modified, to
+            prevent it copy the parameter before calling the function.
+        zero_index:
+            Index where the zero is at.
 
         Returns
         -------
-        Tuple[np.ndarray, np.ndarray]
-            Result of the application of these movements to the ordered puzzle.
-            List of movements being:
+        movement: int
+            Movement selected, could be one of:
                  - 3 -> Up
                  - -3 -> Bottom
                  - 1 -> Right
-                 - -1 -> Left"""
-        current_index = np.where(self.order == 0)[0][0]
+                 - -1 -> Left
+        new_index: int
+            New index of the zero on the order.
+        """
+        random_movement = random.choice(MOVEMENTS)
+        new_index = zero_index + random_movement
+
+        beyond_bounds = new_index < 0 or new_index > 8
+        incorrect_left = zero_index % 3 == 0 and random_movement == -1
+        incorrect_right = zero_index % 3 == 2 and random_movement == 1
+
+        if beyond_bounds or incorrect_left or incorrect_right:
+            random_movement = -1 * random_movement
+            new_index = zero_index + random_movement
+
+        current_order[[zero_index, new_index]] = current_order[new_index], 0
+
+        return random_movement, new_index
+
+    def get_image(self, sequence: np.ndarray) -> torch.Tensor:
+        digits_selection = np.zeros(len(sequence), dtype=np.int16)
+        for index, digit in enumerate(sequence):
+            digits_selection[index] = np.random.choice(self.indices[digit])
+
+        return self._get(digits_selection)[0]
+
+    def get_batch(self, batch_size: int, to_label: bool = True, to_one_hot: bool = True) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        data = torch.zeros((batch_size, 1, self.size, self.size), dtype=torch.float)
+        movements = torch.zeros(batch_size, dtype=torch.int64)
+        transitions = torch.zeros((batch_size, 1, self.size, self.size), dtype=torch.float)
         current_order = self.order.copy()
+        zero_index = 4
 
-        movements = np.zeros(total_movements)
-        available_movements = np.asarray(MOVEMENTS)
-        selected_movements = np.random.choice(available_movements, total_movements)
-        for i, movement in enumerate(selected_movements):
-            new_index = current_index + movement
+        for i in range(batch_size):
+            previous_order = current_order.copy()
+            source = self.get_image(previous_order)
+            data[i] = torch.unsqueeze(source, 0)
 
-            beyond_bounds = new_index < 0 or new_index > 8
-            incorrect_left = current_index % 3 == 0 and movement == -1
-            incorrect_right = current_index % 3 == 2 and movement == 1
+            movement, zero_index = self.random_permutation(current_order, zero_index)
 
-            if beyond_bounds or incorrect_left or incorrect_right:
-                movement = -1 * movement
-                new_index = current_index + movement
+            transition = self.get_image(current_order)
 
+            transitions[i] = torch.unsqueeze(transition, 0)
+            if to_label:
+                movement = MOVEMENT_TO_LABEL[movement]
             movements[i] = movement
-            previous_value = current_order[new_index]
-            current_order[new_index] = 0
-            current_order[current_index] = previous_value
-            current_index = new_index
 
-        return current_order, movements
+        if to_one_hot:
+            movements = one_hot(movements, num_classes=4)
+
+        data.requires_grad = True
+
+        return data, transitions, movements
 
     def _get(self, indices: np.ndarray) -> Tuple[torch.Tensor, np.ndarray]:
         """Returns the 8-puzzle wrote on 'sequence'.
@@ -140,38 +169,3 @@ class Puzzle8MnistGenerator:
                 self.base_image[xmin:xmax, ymin:ymax] = image
 
         return self.base_image, digits
-
-    def get(
-        self,
-        ordered: bool = False,
-        sequence: Optional[Union[np.ndarray, List[int], Tuple[int, ...]]] = None,
-    ) -> Tuple[torch.Tensor, np.ndarray]:
-        """Returns a random generated 8-puzzle.
-
-        Parameters
-        ----------
-        ordered: bool = False
-            If True the 8-puzzle will be ordered.
-        sequence: Optional[Union[np.ndarray, List[int], Tuple[int, ...]]]
-            If given this sequence is used instead of random selected digits.
-
-        Returns
-        -------
-        Tuple[torch.Tensor, np.ndarray]
-            Image of the 8-Puzzle generated.
-            Order of the digits on the mnist puzzle."""
-        empty_sequence = sequence is None
-        if empty_sequence:
-            sequence = self.order
-
-        sequence = to_numpy(sequence)
-
-        if not ordered and empty_sequence:
-            sequence = self._random_movements()[0]
-            assert is_solvable(sequence, self.order)
-
-        digits_selection = np.zeros(len(sequence), dtype=np.int16)
-        for index, digit in enumerate(sequence):
-            digits_selection[index] = np.random.choice(self.indices[digit])
-
-        return self._get(digits_selection)
