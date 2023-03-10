@@ -3,7 +3,11 @@ from matplotlib import pyplot as plt
 from PIL.Image import Image
 
 
-def plot_images(images: List[Image], size: Tuple[int, int] = (3, 3), titles: Optional[List[str]] = None):
+def plot_images(
+    images: List[Image],
+    size: Tuple[int, int] = (3, 3),
+    titles: Optional[List[str]] = None,
+):
     """Plots a grid of images.
 
     Parameters

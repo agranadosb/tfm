@@ -119,7 +119,7 @@ class MultiModelUnet(UNet):
         self.relu = nn.ReLU()
 
         self.prediction = nn.Linear(64, 4)
-        self.softmax = nn.Softmax()
+        self.softmax = nn.Softmax(dim=1)
 
     def forward(self, x: torch.Tensor):
         encoder_out_1 = self.encoder_block1_conv2(self.encoder_block1_conv1(x))
@@ -134,7 +134,9 @@ class MultiModelUnet(UNet):
             self.embedding_conv1(self.encoder_block2_pool(encoder_out_3))
         )
 
-        movements_out = self.relu(self.linear(self.flatten(self.max_pool(embedding_out))))
+        movements_out = self.relu(
+            self.linear(self.flatten(self.max_pool(embedding_out)))
+        )
 
         decoder_out_1 = self.decoder_block1_conv2(
             self.decoder_block1_conv1(
@@ -161,4 +163,6 @@ class MultiModelUnet(UNet):
             )
         )
 
-        return self.final_conv(decoder_out_3), self.softmax(self.prediction(movements_out))
+        return self.final_conv(decoder_out_3), self.softmax(
+            self.prediction(movements_out)
+        )
