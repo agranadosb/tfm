@@ -5,8 +5,7 @@ import torchvision
 from torchvision import transforms
 
 from tfm.data.puzzle import Puzzle8MnistGenerator
-from tfm.model.net import UNet
-from tfm.model.trainer import UnetMultiModalTrainer
+from tfm.model.trainer import UnetMultiModalTrainer, Configuration
 
 from tfm.plots.images import plot_images
 from tfm.utils.puzzle import is_solvable
@@ -39,7 +38,7 @@ if __name__ == "__main__":
     # plot_images([transforms.ToPILImage()(image) for image in images])
     # plot_images([transforms.ToPILImage()(a) for a in transitions])
 
-    UnetMultiModalTrainer(64, 100).train(100)
+    UnetMultiModalTrainer(Configuration(64, 100)).train(100)
 
     """images, transitions, movements = p.get_batch(32)
 

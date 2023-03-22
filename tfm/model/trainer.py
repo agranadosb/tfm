@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Tuple, Optional, List
 
 import torch
@@ -9,17 +10,29 @@ from torchvision import transforms
 
 from tfm.constants import LABEL_TO_MOVEMENT
 from tfm.data.puzzle import Puzzle8MnistGenerator
-from tfm.model.net import MultiModelUnet
+from tfm.model.net import GeneralResnetUnet, ResNetBlock, ConvBlock
 from tfm.plots.images import plot_images
 
 
+@dataclass
+class Configuration:
+    batch_size: int
+    batches: int
+    show_eval_samples: Optional[int] = 3
+    shuffle: bool = True
+
+
+@dataclass
+class LossItem:
+    transitions: Tensor
+    predictions: Tensor
+    movements: Tensor
+    predictions_movements: Tensor
+
+
 class UnetMultiModalTrainer:
-    def __init__(
-        self, batch_size: int, batches: int, show_eval_samples: Optional[int] = 3
-    ):
-        self.batch_size = batch_size
-        self.batches = batches
-        self.show_eval_samples = show_eval_samples
+    def __init__(self, conf: Configuration):
+        self.conf = conf
         self.current_epoch = 0
         self.epochs = 0
         self.step_name = "none"
@@ -27,7 +40,16 @@ class UnetMultiModalTrainer:
         self.puzzle = Puzzle8MnistGenerator(order=[1, 2, 3, 8, 0, 4, 7, 6, 5])
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.model = MultiModelUnet(1)
+        self.encoder_blocks = [(1, 64), (64, 128), (128, 256)]
+        self.decoder_blocks = [(512, 256), (256, 128), (128, 64)]
+
+        self.encoder_layer = lambda in_channels, out_channels: ResNetBlock(in_channels, out_channels, out_channels)
+        self.decoder_layer = lambda in_channels, out_channels: ResNetBlock(in_channels, in_channels, out_channels)
+
+        self.encoder_layer = lambda in_channels, out_channels: ConvBlock(in_channels, out_channels)
+        self.decoder_layer = lambda in_channels, out_channels: ConvBlock(in_channels, out_channels)
+
+        self.model = GeneralResnetUnet(self.encoder_blocks, self.decoder_blocks, self.encoder_layer, self.decoder_layer)
         self.image_criterion = nn.MSELoss()
         self.movements_criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
@@ -48,7 +70,7 @@ class UnetMultiModalTrainer:
         self.total_recall = torch.Tensor()
 
     def samples(self) -> Tuple[Tensor, Tensor, Tensor]:
-        images, transitions, movements = self.puzzle.get_batch(self.batch_size)
+        images, transitions, movements = self.puzzle.get_batch(self.conf.batch_size)
         images = torchvision.transforms.Resize((64, 64))(images)
         transitions = torchvision.transforms.Resize((64, 64))(transitions)
 
@@ -60,14 +82,13 @@ class UnetMultiModalTrainer:
 
     def loss(
         self,
-        transitions: Tensor,
-        predictions: Tensor,
-        movements: Tensor,
-        predictions_movements: Tensor,
+        loss_item: LossItem,
         weights: Tuple[float, float, float] = (0.75, 0.25, 10.0),
     ) -> Tuple[Tensor, Tensor, Tensor]:
-        images_loss = self.image_criterion(transitions, predictions)
-        movements_loss = self.movements_criterion(movements, predictions_movements)
+        images_loss = self.image_criterion(loss_item.transitions, loss_item.predictions)
+        movements_loss = self.movements_criterion(
+            loss_item.movements, loss_item.predictions_movements
+        )
 
         total_loss = images_loss + movements_loss
 
@@ -127,9 +148,8 @@ class UnetMultiModalTrainer:
             predictions_movements, movements
         )
 
-        loss, images_loss, movements_loss = self.loss(
-            transitions, predictions, movements, predictions_movements
-        )
+        loss_item = LossItem(transitions, predictions, movements, predictions_movements)
+        loss, images_loss, movements_loss = self.loss(loss_item)
 
         self.total_loss += loss
         self.total_images_loss += images_loss
@@ -155,8 +175,8 @@ class UnetMultiModalTrainer:
     def epoch(self):
         self.create_metrics()
         self.step_name = "train"
-        with tqdm.tqdm(total=self.batches) as progress_bar:
-            for batch in range(1, self.batches + 1):
+        with tqdm.tqdm(total=self.conf.batches) as progress_bar:
+            for batch in range(1, self.conf.batches + 1):
                 self.optimizer.zero_grad()
 
                 loss, _, _ = self.step(batch, progress_bar)
@@ -173,7 +193,7 @@ class UnetMultiModalTrainer:
         self.create_metrics()
         self.step_name = "eval"
 
-        batches = self.batches // 2
+        batches = self.conf.batches // 2
         with tqdm.tqdm(total=batches) as progress_bar:
             for batch in range(1, batches + 1):
                 images, transitions, movements = self.samples()
@@ -183,16 +203,16 @@ class UnetMultiModalTrainer:
                         batch, progress_bar
                     )
 
-                    if self.show_eval_samples:
-                        size = self.show_eval_samples, 3
+                    if self.conf.show_eval_samples and False:
+                        size = self.conf.show_eval_samples, 3
                         results: List[Tensor] = [  # noqa
-                            None for _ in range(self.show_eval_samples * 3)
+                            None for _ in range(self.conf.show_eval_samples * 3)
                         ]
                         titles: List[str] = [
-                            "" for _ in range(self.show_eval_samples * 3)
+                            "" for _ in range(self.conf.show_eval_samples * 3)
                         ]
 
-                        for i in range(self.show_eval_samples):
+                        for i in range(self.conf.show_eval_samples):
                             results[3 * i] = images[i]
                             results[3 * i + 1] = predictions[i]
                             results[3 * i + 2] = transitions[i]
@@ -232,3 +252,4 @@ class UnetMultiModalTrainer:
             self.current_epoch = epoch
             self.epoch()
             self.eval()
+        torch.save(self.model.state_dict(), ".")

@@ -112,14 +112,14 @@ class Puzzle8MnistGenerator:
 
         return self._get(digits_selection)[0]
 
-    def get_batch(self, batch_size: int, to_label: bool = True, to_one_hot: bool = True) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        data = torch.zeros((batch_size, 1, self.size, self.size), dtype=torch.float)
-        movements = torch.zeros(batch_size, dtype=torch.int64)
-        transitions = torch.zeros((batch_size, 1, self.size, self.size), dtype=torch.float)
+    def get_batch(self, batch_size: int, to_label: bool = True, to_one_hot: bool = True, shuffle: bool = True) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        data = torch.zeros((batch_size * 4, 1, self.size, self.size), dtype=torch.float)
+        movements = torch.zeros(batch_size * 4, dtype=torch.int64)
+        transitions = torch.zeros((batch_size * 4, 1, self.size, self.size), dtype=torch.float)
         current_order = self.order.copy()
         zero_index = 4
 
-        for i in range(batch_size):
+        for i in range(batch_size * 4):
             previous_order = current_order.copy()
             source = self.get_image(previous_order)
             data[i] = torch.unsqueeze(source, 0)
@@ -135,6 +135,12 @@ class Puzzle8MnistGenerator:
 
         if to_one_hot:
             movements = one_hot(movements, num_classes=4)
+
+        permutation = torch.randperm(batch_size * 4)
+
+        data = data[permutation][:batch_size]
+        transitions = transitions[permutation][:batch_size]
+        movements = movements[permutation][:batch_size]
 
         data.requires_grad = True
 

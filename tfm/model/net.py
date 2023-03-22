@@ -1,3 +1,5 @@
+from typing import List, Tuple, Callable
+
 import torch
 from torch import nn
 
@@ -31,87 +33,86 @@ class ResNetBlock(nn.Module):
         return x + out
 
 
-class UNet(nn.Module):
-    def __init__(self, in_channels: int = 3, batched: bool = True):
+class Base(nn.Module):
+    def __init__(self, blocks: List[Tuple[int, int]], layer_function: Callable):
         super().__init__()
+        self.layer_function = layer_function
+        self.layers = [
+            self.get_layer(in_channels, out_channels)
+            for in_channels, out_channels in blocks
+        ]
+
+    def to(self, device):
+        super().to(device)
+        for layer in self.layers:
+            for component in layer:
+                component.to(device)
+
+
+class ResNetEncoder(Base):
+    def get_layer(
+        self, in_channels: int, out_channels
+    ) -> Tuple[nn.Module, nn.Module, nn.Module]:
+        return (
+            self.layer_function(in_channels, out_channels),
+            self.layer_function(out_channels, out_channels),
+            nn.MaxPool2d(2),
+        )
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+        partial_outs = [None] * len(self.layers)
+        for index, (conv_1, conv_2, pool) in enumerate(self.layers):
+            x = conv_2(conv_1(x))
+            partial_outs[index] = x
+            x = pool(x)
+        return x, partial_outs  # noqa
+
+
+class ResNetDecoder(Base):
+    def __init__(self, blocks: List[Tuple[int, int]], layer_function: Callable, batched: bool = True):
+        super().__init__(blocks, layer_function)
 
         self.cat_dim = 0
         if batched:
             self.cat_dim = 1
 
-        self.encoder_block1_conv1 = ResNetBlock(in_channels, 64, 64)
-        self.encoder_block1_conv2 = ResNetBlock(64, 64, 64)
-        self.encoder_block1_pool = nn.MaxPool2d(2)
-
-        self.encoder_block2_conv1 = ResNetBlock(64, 128, 128)
-        self.encoder_block2_conv2 = ResNetBlock(128, 128, 128)
-        self.encoder_block2_pool = nn.MaxPool2d(2)
-
-        self.encoder_block3_conv1 = ResNetBlock(128, 256, 256)
-        self.encoder_block3_conv2 = ResNetBlock(256, 256, 256)
-        self.encoder_block3_pool = nn.MaxPool2d(2)
-
-        self.embedding_conv1 = ResNetBlock(256, 256, 512)
-        self.embedding_conv2 = ResNetBlock(512, 512, 512)
-
-        self.decoder_block1_upconv = nn.ConvTranspose2d(512, 256, 2, 2)
-        self.decoder_block1_conv1 = ResNetBlock(512, 512, 256)
-        self.decoder_block1_conv2 = ResNetBlock(256, 256, 256)
-
-        self.decoder_block2_upconv = nn.ConvTranspose2d(256, 128, 2, 2)
-        self.decoder_block2_conv1 = ResNetBlock(256, 256, 128)
-        self.decoder_block2_conv2 = ResNetBlock(128, 128, 128)
-
-        self.decoder_block3_upconv = nn.ConvTranspose2d(128, 64, 2, 2)
-        self.decoder_block3_conv1 = ResNetBlock(128, 128, 64)
-        self.decoder_block3_conv2 = ResNetBlock(64, 64, 64)
-
-        self.final_conv = ResNetBlock(64, 64, 1)
-
-    def forward(self, x: torch.Tensor):
-        encoder_out_1 = self.encoder_block1_conv2(self.encoder_block1_conv1(x))
-        encoder_out_2 = self.encoder_block2_conv2(
-            self.encoder_block2_conv1(self.encoder_block1_pool(encoder_out_1))
-        )
-        encoder_out_3 = self.encoder_block3_conv2(
-            self.encoder_block3_conv1(self.encoder_block2_pool(encoder_out_2))
+    def get_layer(
+        self, in_channels: int, out_channels
+    ) -> Tuple[nn.Module, nn.Module, nn.Module]:
+        return (
+            nn.ConvTranspose2d(in_channels, out_channels, 2, 2),
+            self.layer_function(in_channels, out_channels),
+            self.layer_function(out_channels, out_channels),
         )
 
-        embedding_out = self.embedding_conv2(
-            self.embedding_conv1(self.encoder_block2_pool(encoder_out_3))
-        )
-
-        decoder_out_1 = self.decoder_block1_conv2(
-            self.decoder_block1_conv1(
-                torch.cat(
-                    [encoder_out_3, self.decoder_block1_upconv(embedding_out)],
-                    dim=self.cat_dim,
-                )
-            )
-        )
-        decoder_out_2 = self.decoder_block2_conv2(
-            self.decoder_block2_conv1(
-                torch.cat(
-                    [encoder_out_2, self.decoder_block2_upconv(decoder_out_1)],
-                    dim=self.cat_dim,
-                )
-            )
-        )
-        decoder_out_3 = self.decoder_block3_conv2(
-            self.decoder_block3_conv1(
-                torch.cat(
-                    [encoder_out_1, self.decoder_block3_upconv(decoder_out_2)],
-                    dim=self.cat_dim,
-                )
-            )
-        )
-
-        return self.final_conv(decoder_out_3)
+    def forward(
+        self, x: torch.Tensor, encoder_outs: List[torch.Tensor]
+    ) -> torch.Tensor:
+        for encoder_out, (transpose, conv_1, conv_2) in zip(encoder_outs, self.layers):
+            cat_result = torch.cat([encoder_out, transpose(x)], dim=self.cat_dim)
+            x = conv_2(conv_1(cat_result))
+        return x
 
 
-class MultiModelUnet(UNet):
-    def __init__(self, in_channels: int = 3, batched: bool = True):
-        super().__init__(in_channels, batched)
+class GeneralResnetUnet(nn.Module):
+    def __init__(
+        self,
+        encoder_blocks: List[Tuple[int, int]],
+        decoder_blocks: List[Tuple[int, int]],
+        encoder_layer_function: Callable,
+        decoder_layer_function: Callable,
+        batched: bool = True,
+    ):
+        super().__init__()
+
+        self.encoder = ResNetEncoder(encoder_blocks, encoder_layer_function)
+        self.decoder = ResNetDecoder(decoder_blocks, decoder_layer_function, batched)
+
+        in_embedding = encoder_blocks[-1][1]
+        out_embedding = decoder_blocks[0][0]
+
+        self.embedding_conv1 = ResNetBlock(in_embedding, in_embedding, out_embedding)
+        self.embedding_conv2 = ResNetBlock(out_embedding, out_embedding, out_embedding)
 
         self.max_pool = nn.MaxPool2d(4)
         self.flatten = nn.Flatten(start_dim=1)
@@ -121,48 +122,22 @@ class MultiModelUnet(UNet):
         self.prediction = nn.Linear(64, 4)
         self.softmax = nn.Softmax(dim=1)
 
-    def forward(self, x: torch.Tensor):
-        encoder_out_1 = self.encoder_block1_conv2(self.encoder_block1_conv1(x))
-        encoder_out_2 = self.encoder_block2_conv2(
-            self.encoder_block2_conv1(self.encoder_block1_pool(encoder_out_1))
-        )
-        encoder_out_3 = self.encoder_block3_conv2(
-            self.encoder_block3_conv1(self.encoder_block2_pool(encoder_out_2))
-        )
+        self.final_conv = ResNetBlock(64, 64, 1)
 
-        embedding_out = self.embedding_conv2(
-            self.embedding_conv1(self.encoder_block2_pool(encoder_out_3))
-        )
+    def to(self, device):
+        super().to(device)
+        self.encoder.to(device)
+        self.decoder.to(device)
 
-        movements_out = self.relu(
-            self.linear(self.flatten(self.max_pool(embedding_out)))
-        )
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        x, encoder_outs = self.encoder(x)
+        encoder_outs.reverse()
 
-        decoder_out_1 = self.decoder_block1_conv2(
-            self.decoder_block1_conv1(
-                torch.cat(
-                    [encoder_out_3, self.decoder_block1_upconv(embedding_out)],
-                    dim=self.cat_dim,
-                )
-            )
-        )
-        decoder_out_2 = self.decoder_block2_conv2(
-            self.decoder_block2_conv1(
-                torch.cat(
-                    [encoder_out_2, self.decoder_block2_upconv(decoder_out_1)],
-                    dim=self.cat_dim,
-                )
-            )
-        )
-        decoder_out_3 = self.decoder_block3_conv2(
-            self.decoder_block3_conv1(
-                torch.cat(
-                    [encoder_out_1, self.decoder_block3_upconv(decoder_out_2)],
-                    dim=self.cat_dim,
-                )
-            )
-        )
+        x = self.embedding_conv2(self.embedding_conv1(x))
 
-        return self.final_conv(decoder_out_3), self.softmax(
-            self.prediction(movements_out)
-        )
+        movements_out = self.relu(self.linear(self.flatten(self.max_pool(x))))
+        movements_out = self.softmax(self.prediction(movements_out))
+
+        x = self.decoder(x, encoder_outs)
+
+        return self.final_conv(x), movements_out
