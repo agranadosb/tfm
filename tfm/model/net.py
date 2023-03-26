@@ -43,30 +43,29 @@ class ResNetBlock(nn.Module):
 
 
 class Base(nn.Module):
+    def get_layer(self, in_channels: int, out_channels: int) -> nn.ModuleList:
+        raise NotImplementedError()
+
     def __init__(self, blocks: List[Tuple[int, int]], layer_function: Callable):
         super().__init__()
         self.layer_function = layer_function
         self.blocks = blocks
-        self.layers = [
-            self.get_layer(in_channels, out_channels)
-            for in_channels, out_channels in blocks
-        ]
-
-    def to(self, device):
-        super().to(device)
-        for layer in self.layers:
-            for component in layer:
-                component.to(device)
+        self.layers = nn.ModuleList(
+            [
+                self.get_layer(in_channels, out_channels)
+                for in_channels, out_channels in blocks
+            ]
+        )
 
 
-class ResNetEncoder(Base):
-    def get_layer(
-        self, in_channels: int, out_channels
-    ) -> Tuple[nn.Module, nn.Module, nn.Module]:
-        return (
-            self.layer_function(in_channels, out_channels),
-            self.layer_function(out_channels, out_channels),
-            nn.MaxPool2d(2),
+class BaseEncoder(Base):
+    def get_layer(self, in_channels: int, out_channels) -> nn.ModuleList:
+        return nn.ModuleList(
+            [
+                self.layer_function(in_channels, out_channels),
+                self.layer_function(out_channels, out_channels),
+                nn.MaxPool2d(2),
+            ]
         )
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, List[torch.Tensor]]:
@@ -78,7 +77,7 @@ class ResNetEncoder(Base):
         return x, partial_outs  # noqa
 
 
-class ResNetDecoder(Base):
+class BaseDecoder(Base):
     def __init__(
         self,
         blocks: List[Tuple[int, int]],
@@ -91,13 +90,13 @@ class ResNetDecoder(Base):
         if batched:
             self.cat_dim = 1
 
-    def get_layer(
-        self, in_channels: int, out_channels
-    ) -> Tuple[nn.Module, nn.Module, nn.Module]:
-        return (
-            nn.ConvTranspose2d(in_channels, out_channels, 2, 2),
-            self.layer_function(in_channels, out_channels),
-            self.layer_function(out_channels, out_channels),
+    def get_layer(self, in_channels: int, out_channels) -> nn.ModuleList:
+        return nn.ModuleList(
+            [
+                nn.ConvTranspose2d(in_channels, out_channels, 2, 2),
+                self.layer_function(in_channels, out_channels),
+                self.layer_function(out_channels, out_channels),
+            ]
         )
 
     def forward(
@@ -117,26 +116,21 @@ class MovementsNet(nn.Module):
         conv_layer_function: Callable,
     ):
         super().__init__()
-        self.conv_layers = [conv_layer_function(*block) for block in conv_blocks]
-        self.dense_layers = [DenseLayer(*block) for block in dense_blocks]
+        self.conv_layers = nn.Sequential(
+            *[conv_layer_function(*block) for block in conv_blocks]
+        )
+        self.dense_layers = nn.Sequential(
+            *[DenseLayer(*block) for block in dense_blocks]
+        )
 
         self.flatten = nn.Flatten(start_dim=1)
         self.prediction = nn.Linear(dense_blocks[-1][1], 4)
         self.softmax = nn.Softmax(dim=1)
 
-    def to(self, device):
-        super().to(device)
-        for layer in self.conv_layers + self.dense_layers:
-            layer.to(device)
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        for layer in self.conv_layers:
-            x = layer(x)
-
+        x = self.conv_layers(x)
         x = self.flatten(x)
-
-        for layer in self.dense_layers:
-            x = layer(x)
+        x = self.dense_layers(x)
 
         return self.softmax(self.prediction(x))
 
