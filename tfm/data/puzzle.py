@@ -38,9 +38,8 @@ class Puzzle8MnistGenerator:
     ):
         self.train = train
         self.size = 28 * 3
-        self.transformation = transforms.ToTensor()
         self.dataset = torchvision.datasets.MNIST(
-            root="./data", train=train, download=True
+            root="./data", train=train, download=True, transform=transforms.ToTensor()
         )
         self.order = to_numpy(order)
 
@@ -169,7 +168,6 @@ class Puzzle8MnistGenerator:
                 index = row * 3 + column
 
                 image, digit = self.dataset[indices[index]]
-                image = self.transformation(image)
 
                 digits[index] = digit
                 self.base_image[xmin:xmax, ymin:ymax] = image

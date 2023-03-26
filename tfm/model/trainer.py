@@ -5,12 +5,20 @@ import torch
 import torchvision
 import tqdm as tqdm
 from torch import nn, optim, Tensor
+from torch.cuda.amp import GradScaler
 from torchmetrics.functional import accuracy, precision, recall
 from torchvision import transforms
 
 from tfm.constants import LABEL_TO_MOVEMENT
 from tfm.data.puzzle import Puzzle8MnistGenerator
-from tfm.model.net import GeneralResnetUnet, ResNetBlock, ConvBlock
+from tfm.model.net import (
+    GeneralResnetUnet,
+    ResNetBlock,
+    ConvBlock,
+    ResNetEncoder,
+    ResNetDecoder,
+    MovementsNet,
+)
 from tfm.plots.images import plot_images
 
 
@@ -42,25 +50,58 @@ class UnetMultiModalTrainer:
 
         self.encoder_blocks = [(1, 64), (64, 128), (128, 256)]
         self.decoder_blocks = [(512, 256), (256, 128), (128, 64)]
+        self.conv_movements_blocks = [
+            (512, 512),
+            (512, 256),
+            (256, 256),
+            (256, 128),
+            (128, 128),
+            (128, 64),
+            (64, 32),
+        ]
+        # 32 * 8 * 8
+        self.dense_movements_blocks = [(2048, 512), (512, 64), (64, 8)]
 
-        self.encoder_layer = lambda in_channels, out_channels: ResNetBlock(in_channels, out_channels, out_channels)
-        self.decoder_layer = lambda in_channels, out_channels: ResNetBlock(in_channels, in_channels, out_channels)
+        self.encoder_layer = lambda in_channels, out_channels: ConvBlock(
+            in_channels, out_channels
+        )
+        self.decoder_layer = lambda in_channels, out_channels: ConvBlock(
+            in_channels, out_channels
+        )
 
-        self.encoder_layer = lambda in_channels, out_channels: ConvBlock(in_channels, out_channels)
-        self.decoder_layer = lambda in_channels, out_channels: ConvBlock(in_channels, out_channels)
+        self.encoder_layer = lambda in_channels, out_channels: ResNetBlock(
+            in_channels, out_channels, out_channels
+        )
+        self.decoder_layer = lambda in_channels, out_channels: ResNetBlock(
+            in_channels, in_channels, out_channels
+        )
 
-        self.model = GeneralResnetUnet(self.encoder_blocks, self.decoder_blocks, self.encoder_layer, self.decoder_layer)
+        self.conv_movements_layer = lambda in_channels, out_channels: ResNetBlock(
+            in_channels, out_channels, out_channels
+        )
+
+        self.encoder_net = ResNetEncoder(self.encoder_blocks, self.encoder_layer)
+        self.decoder_net = ResNetDecoder(self.decoder_blocks, self.decoder_layer, True)
+        self.movements_net = MovementsNet(
+            self.conv_movements_blocks,
+            self.dense_movements_blocks,
+            self.conv_movements_layer,
+        )
+
+        self.model = GeneralResnetUnet(
+            self.encoder_net, self.decoder_net, self.movements_net
+        )
         self.image_criterion = nn.MSELoss()
         self.movements_criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
 
-        self.losses = torch.Tensor()
-        self.image_losses = torch.Tensor()
-        self.movements_losses = torch.Tensor()
+        self.losses = []
+        self.image_losses = []
+        self.movements_losses = []
 
-        self.val_losses = torch.Tensor()
-        self.val_image_losses = torch.Tensor()
-        self.val_movements_losses = torch.Tensor()
+        self.val_losses = []
+        self.val_image_losses = []
+        self.val_movements_losses = []
 
         self.total_loss = torch.Tensor()
         self.total_images_loss = torch.Tensor()
@@ -151,13 +192,14 @@ class UnetMultiModalTrainer:
         loss_item = LossItem(transitions, predictions, movements, predictions_movements)
         loss, images_loss, movements_loss = self.loss(loss_item)
 
-        self.total_loss += loss
-        self.total_images_loss += images_loss
-        self.total_movements_loss += movements_loss
+        # TODO: Memory leak
+        self.total_loss += loss.detach()
+        self.total_images_loss += images_loss.detach()
+        self.total_movements_loss += movements_loss.detach()
 
-        self.total_accuracy += batch_accuracy
-        self.total_precision += batch_precision
-        self.total_recall += batch_recall
+        self.total_accuracy += batch_accuracy.detach()
+        self.total_precision += batch_precision.detach()
+        self.total_recall += batch_recall.detach()
 
         batch = torch.Tensor([batch]).to(self.device)
         message = (
@@ -175,19 +217,23 @@ class UnetMultiModalTrainer:
     def epoch(self):
         self.create_metrics()
         self.step_name = "train"
+        scaler = GradScaler()
         with tqdm.tqdm(total=self.conf.batches) as progress_bar:
             for batch in range(1, self.conf.batches + 1):
-                self.optimizer.zero_grad()
+                with torch.cuda.amp.autocast():
+                    loss, _, _ = self.step(batch, progress_bar)
 
-                loss, _, _ = self.step(batch, progress_bar)
+                scaler.scale(loss).backward()
+                if (batch + 1) % 2 == 0:
+                    scaler.step(self.optimizer)
 
-                loss.backward()
+                    scaler.update()
 
-                self.optimizer.step()
+                    self.optimizer.zero_grad(set_to_none=True)
 
-        self.losses[self.current_epoch] = self.total_loss
-        self.image_losses[self.current_epoch] = self.total_images_loss
-        self.movements_losses[self.current_epoch] = self.total_movements_loss
+        self.losses[self.current_epoch] = self.total_loss.detach().item()
+        self.image_losses[self.current_epoch] = self.total_images_loss.detach().item()
+        self.movements_losses[self.current_epoch] = self.total_movements_loss.detach().item()
 
     def eval(self):
         self.create_metrics()
@@ -231,25 +277,34 @@ class UnetMultiModalTrainer:
                             titles=titles,
                         )
 
-        self.val_losses[self.current_epoch] = self.total_loss
-        self.val_image_losses[self.current_epoch] = self.total_images_loss
-        self.val_movements_losses[self.current_epoch] = self.total_movements_loss
+        self.val_losses[self.current_epoch] = self.total_loss.detach().item()
+        self.val_image_losses[self.current_epoch] = self.total_images_loss.detach().item()
+        self.val_movements_losses[self.current_epoch] = self.total_movements_loss.detach().item()
+
+    def save_results(self, filename: str, losses: List[float], images_loss: List[float], movements_loss: List[int]):
+        with open(filename, "w") as file:
+            file.write("epoch,loss,image_loss,movement_loss\n")
+            for index, (loss, image_loss, movements_loss) in enumerate(zip(losses, images_loss, movements_loss)):
+                file.write(f"{index},{loss},{image_loss},{movements_loss}")
 
     def train(self, epochs: int):
         self.model.train()
         self.model.to(self.device)
         self.epochs = epochs
 
-        self.losses = torch.zeros(epochs)
-        self.image_losses = torch.zeros(epochs)
-        self.movements_losses = torch.zeros(epochs)
+        self.losses = [-1 for _ in range(epochs)]
+        self.image_losses = self.losses.copy()
+        self.movements_losses = self.losses.copy()
 
-        self.val_losses = torch.zeros(epochs)
-        self.val_image_losses = torch.zeros(epochs)
-        self.val_movements_losses = torch.zeros(epochs)
+        self.val_losses = self.losses.copy()
+        self.val_image_losses = self.losses.copy()
+        self.val_movements_losses = self.losses.copy()
 
         for epoch in range(epochs):
             self.current_epoch = epoch
             self.epoch()
             self.eval()
-        torch.save(self.model.state_dict(), ".")
+
+        torch.save(self.model.state_dict(), "model")
+        self.save_results("train-results.txt", self.losses, self.image_losses, self.movements_losses)
+        self.save_results("val-results.txt", self.val_losses, self.val_image_losses, self.val_movements_losses)

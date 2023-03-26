@@ -4,6 +4,16 @@ import torch
 from torch import nn
 
 
+class DenseLayer(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+        self.linear = nn.Linear(in_channels, out_channels)
+        self.relu = nn.ReLU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.relu(self.linear(x))
+
+
 class ConvBlock(nn.Module):
     def __init__(self, in_channels: int, out_channels: int):
         super().__init__()
@@ -11,7 +21,9 @@ class ConvBlock(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, x):
-        return self.relu(self.relu(self.conv(x)))
+        x = self.conv(x)
+        x = self.relu(x)
+        return x
 
 
 class ResNetBlock(nn.Module):
@@ -21,13 +33,10 @@ class ResNetBlock(nn.Module):
         self.conv2 = ConvBlock(mid_channels, out_channels)
         self.aux_conv = ConvBlock(in_channels, out_channels)
 
-        self.relu1 = nn.ReLU()
-        self.relu2 = nn.ReLU()
-
         self.apply_aux = in_channels != out_channels
 
     def forward(self, x):
-        out = self.relu2(self.conv2(self.relu1(self.conv1(x))))
+        out = self.conv2(self.conv1(x))
         if self.apply_aux:
             x = self.aux_conv(x)
         return x + out
@@ -37,6 +46,7 @@ class Base(nn.Module):
     def __init__(self, blocks: List[Tuple[int, int]], layer_function: Callable):
         super().__init__()
         self.layer_function = layer_function
+        self.blocks = blocks
         self.layers = [
             self.get_layer(in_channels, out_channels)
             for in_channels, out_channels in blocks
@@ -69,7 +79,12 @@ class ResNetEncoder(Base):
 
 
 class ResNetDecoder(Base):
-    def __init__(self, blocks: List[Tuple[int, int]], layer_function: Callable, batched: bool = True):
+    def __init__(
+        self,
+        blocks: List[Tuple[int, int]],
+        layer_function: Callable,
+        batched: bool = True,
+    ):
         super().__init__(blocks, layer_function)
 
         self.cat_dim = 0
@@ -94,50 +109,72 @@ class ResNetDecoder(Base):
         return x
 
 
+class MovementsNet(nn.Module):
+    def __init__(
+        self,
+        conv_blocks: List[Tuple[int, int]],
+        dense_blocks: List[Tuple[int, int]],
+        conv_layer_function: Callable,
+    ):
+        super().__init__()
+        self.conv_layers = [conv_layer_function(*block) for block in conv_blocks]
+        self.dense_layers = [DenseLayer(*block) for block in dense_blocks]
+
+        self.flatten = nn.Flatten(start_dim=1)
+        self.prediction = nn.Linear(dense_blocks[-1][1], 4)
+        self.softmax = nn.Softmax(dim=1)
+
+    def to(self, device):
+        super().to(device)
+        for layer in self.conv_layers + self.dense_layers:
+            layer.to(device)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        for layer in self.conv_layers:
+            x = layer(x)
+
+        x = self.flatten(x)
+
+        for layer in self.dense_layers:
+            x = layer(x)
+
+        return self.softmax(self.prediction(x))
+
+
 class GeneralResnetUnet(nn.Module):
     def __init__(
         self,
-        encoder_blocks: List[Tuple[int, int]],
-        decoder_blocks: List[Tuple[int, int]],
-        encoder_layer_function: Callable,
-        decoder_layer_function: Callable,
-        batched: bool = True,
+        encoder: Base,
+        decoder: Base,
+        movements: nn.Module,
     ):
         super().__init__()
 
-        self.encoder = ResNetEncoder(encoder_blocks, encoder_layer_function)
-        self.decoder = ResNetDecoder(decoder_blocks, decoder_layer_function, batched)
+        self.encoder = encoder
+        self.decoder = decoder
+        self.movements = movements
 
-        in_embedding = encoder_blocks[-1][1]
-        out_embedding = decoder_blocks[0][0]
+        in_embedding = encoder.blocks[-1][1]
+        out_embedding = decoder.blocks[0][0]
+        final_channels = decoder.blocks[-1][1]
 
         self.embedding_conv1 = ResNetBlock(in_embedding, in_embedding, out_embedding)
         self.embedding_conv2 = ResNetBlock(out_embedding, out_embedding, out_embedding)
 
-        self.max_pool = nn.MaxPool2d(4)
-        self.flatten = nn.Flatten(start_dim=1)
-        self.linear = nn.Linear(2048, 64)
-        self.relu = nn.ReLU()
-
-        self.prediction = nn.Linear(64, 4)
-        self.softmax = nn.Softmax(dim=1)
-
-        self.final_conv = ResNetBlock(64, 64, 1)
+        self.final_conv = ResNetBlock(final_channels, final_channels, 1)
 
     def to(self, device):
         super().to(device)
         self.encoder.to(device)
         self.decoder.to(device)
+        self.movements.to(device)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         x, encoder_outs = self.encoder(x)
         encoder_outs.reverse()
 
         x = self.embedding_conv2(self.embedding_conv1(x))
-
-        movements_out = self.relu(self.linear(self.flatten(self.max_pool(x))))
-        movements_out = self.softmax(self.prediction(movements_out))
-
+        movements_out = self.movements(x)
         x = self.decoder(x, encoder_outs)
 
         return self.final_conv(x), movements_out
