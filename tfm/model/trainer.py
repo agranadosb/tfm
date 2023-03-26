@@ -6,8 +6,9 @@ import torchvision
 import tqdm as tqdm
 from torch import nn, optim, Tensor
 from torch.cuda.amp import GradScaler
+from torch.nn.utils import clip_grad_norm_
+from torch.utils.tensorboard import SummaryWriter
 from torchmetrics.functional import accuracy, precision, recall
-from torchvision import transforms
 
 from tfm.constants import LABEL_TO_MOVEMENT
 from tfm.data.puzzle import Puzzle8MnistGenerator
@@ -15,11 +16,10 @@ from tfm.model.net import (
     GeneralResnetUnet,
     ResNetBlock,
     ConvBlock,
-    ResNetEncoder,
-    ResNetDecoder,
+    BaseEncoder,
+    BaseDecoder,
     MovementsNet,
 )
-from tfm.plots.images import plot_images
 
 
 @dataclass
@@ -80,17 +80,19 @@ class UnetMultiModalTrainer:
             in_channels, out_channels, out_channels
         )
 
-        self.encoder_net = ResNetEncoder(self.encoder_blocks, self.encoder_layer)
-        self.decoder_net = ResNetDecoder(self.decoder_blocks, self.decoder_layer, True)
+        self.encoder_net = BaseEncoder(self.encoder_blocks, self.encoder_layer)
+        self.decoder_net = BaseDecoder(self.decoder_blocks, self.decoder_layer, True)
         self.movements_net = MovementsNet(
             self.conv_movements_blocks,
             self.dense_movements_blocks,
             self.conv_movements_layer,
         )
 
+        self.writer = None
         self.model = GeneralResnetUnet(
             self.encoder_net, self.decoder_net, self.movements_net
         )
+
         self.image_criterion = nn.MSELoss()
         self.movements_criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
@@ -180,7 +182,7 @@ class UnetMultiModalTrainer:
         self,
         batch: int,
         progress_bar: tqdm.tqdm,
-    ) -> Tuple[Tensor, Tensor, Tensor]:
+    ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
         images, transitions, movements = self.samples()
 
         predictions, predictions_movements = self.model(images)
@@ -192,7 +194,6 @@ class UnetMultiModalTrainer:
         loss_item = LossItem(transitions, predictions, movements, predictions_movements)
         loss, images_loss, movements_loss = self.loss(loss_item)
 
-        # TODO: Memory leak
         self.total_loss += loss.detach()
         self.total_images_loss += images_loss.detach()
         self.total_movements_loss += movements_loss.detach()
@@ -212,7 +213,7 @@ class UnetMultiModalTrainer:
         )
         self.update_progress(progress_bar, message)
 
-        return loss, predictions, predictions_movements
+        return loss, predictions, predictions_movements, images, transitions, movements
 
     def epoch(self):
         self.create_metrics()
@@ -221,9 +222,10 @@ class UnetMultiModalTrainer:
         with tqdm.tqdm(total=self.conf.batches) as progress_bar:
             for batch in range(1, self.conf.batches + 1):
                 with torch.cuda.amp.autocast():
-                    loss, _, _ = self.step(batch, progress_bar)
+                    loss, *_ = self.step(batch, progress_bar)
 
                 scaler.scale(loss).backward()
+                clip_grad_norm_(self.model.parameters(), 5)
                 if (batch + 1) % 2 == 0:
                     scaler.step(self.optimizer)
 
@@ -231,9 +233,24 @@ class UnetMultiModalTrainer:
 
                     self.optimizer.zero_grad(set_to_none=True)
 
+        self.writer.add_scalar(
+            "Loss/train", self.total_loss.detach().item(), self.current_epoch
+        )
+        self.writer.add_scalar(
+            "Images-Loss/train",
+            self.total_images_loss.detach().item(),
+            self.current_epoch,
+        )
+        self.writer.add_scalar(
+            "Movements-Loss/train",
+            self.total_movements_loss.detach().item(),
+            self.current_epoch,
+        )
         self.losses[self.current_epoch] = self.total_loss.detach().item()
         self.image_losses[self.current_epoch] = self.total_images_loss.detach().item()
-        self.movements_losses[self.current_epoch] = self.total_movements_loss.detach().item()
+        self.movements_losses[
+            self.current_epoch
+        ] = self.total_movements_loss.detach().item()
 
     def eval(self):
         self.create_metrics()
@@ -242,69 +259,115 @@ class UnetMultiModalTrainer:
         batches = self.conf.batches // 2
         with tqdm.tqdm(total=batches) as progress_bar:
             for batch in range(1, batches + 1):
-                images, transitions, movements = self.samples()
-
                 with torch.no_grad():
-                    loss, predictions, predictions_movements = self.step(
-                        batch, progress_bar
-                    )
+                    (
+                        loss,
+                        predictions,
+                        predictions_movements,
+                        images,
+                        transitions,
+                        movements,
+                    ) = self.step(batch, progress_bar)
 
-                    if self.conf.show_eval_samples and False:
-                        size = self.conf.show_eval_samples, 3
+                    if self.conf.show_eval_samples:
                         results: List[Tensor] = [  # noqa
                             None for _ in range(self.conf.show_eval_samples * 3)
                         ]
-                        titles: List[str] = [
-                            "" for _ in range(self.conf.show_eval_samples * 3)
-                        ]
 
+                        movements_results = ""
                         for i in range(self.conf.show_eval_samples):
                             results[3 * i] = images[i]
                             results[3 * i + 1] = predictions[i]
                             results[3 * i + 2] = transitions[i]
 
-                            titles[3 * i] = ""
-                            titles[3 * i + 1] = LABEL_TO_MOVEMENT[
+                            prediction_movement = LABEL_TO_MOVEMENT[
                                 torch.argmax(predictions_movements[i]).item()
                             ]
-                            titles[3 * i + 2] = LABEL_TO_MOVEMENT[
+                            ground_truth_movement = LABEL_TO_MOVEMENT[
                                 torch.argmax(movements[i]).item()
                             ]
+                            movements_results += (
+                                f"| {ground_truth_movement} {prediction_movement}"
+                            )
 
-                        plot_images(
-                            [transforms.ToPILImage()(image) for image in results[:9]],
-                            size=size,
-                            titles=titles,
+                        grid = torchvision.utils.make_grid(results, padding=20)
+                        self.writer.add_image(
+                            f"Images-{batch}", grid, self.current_epoch
+                        )
+                        self.writer.add_text(
+                            f"Movements-{batch}", movements_results, self.current_epoch
                         )
 
+        self.writer.add_scalar(
+            "Loss/val", self.total_loss.detach().item(), self.current_epoch
+        )
+        self.writer.add_scalar(
+            "Images-Loss/val",
+            self.total_images_loss.detach().item(),
+            self.current_epoch,
+        )
+        self.writer.add_scalar(
+            "Movements-Loss/val",
+            self.total_movements_loss.detach().item(),
+            self.current_epoch,
+        )
         self.val_losses[self.current_epoch] = self.total_loss.detach().item()
-        self.val_image_losses[self.current_epoch] = self.total_images_loss.detach().item()
-        self.val_movements_losses[self.current_epoch] = self.total_movements_loss.detach().item()
+        self.val_image_losses[
+            self.current_epoch
+        ] = self.total_images_loss.detach().item()
+        self.val_movements_losses[
+            self.current_epoch
+        ] = self.total_movements_loss.detach().item()
 
-    def save_results(self, filename: str, losses: List[float], images_loss: List[float], movements_loss: List[int]):
+    def save_results(
+        self,
+        filename: str,
+        losses: List[float],
+        images_loss: List[float],
+        movements_loss: List[int],
+    ):
         with open(filename, "w") as file:
             file.write("epoch,loss,image_loss,movement_loss\n")
-            for index, (loss, image_loss, movements_loss) in enumerate(zip(losses, images_loss, movements_loss)):
+            for index, (loss, image_loss, movements_loss) in enumerate(
+                zip(losses, images_loss, movements_loss)
+            ):
                 file.write(f"{index},{loss},{image_loss},{movements_loss}")
 
     def train(self, epochs: int):
-        self.model.train()
-        self.model.to(self.device)
-        self.epochs = epochs
+        with SummaryWriter("runs/unet+") as writer:
+            self.writer = writer
 
-        self.losses = [-1 for _ in range(epochs)]
-        self.image_losses = self.losses.copy()
-        self.movements_losses = self.losses.copy()
+            self.model.to(self.device)
+            with torch.no_grad():
+                self.writer.add_graph(
+                    self.model, torch.zeros((1, 1, 64, 64)).to(self.device)
+                )
+            self.model.train()
+            self.epochs = epochs
 
-        self.val_losses = self.losses.copy()
-        self.val_image_losses = self.losses.copy()
-        self.val_movements_losses = self.losses.copy()
+            self.losses = [-1 for _ in range(epochs)]
+            self.image_losses = self.losses.copy()
+            self.movements_losses = self.losses.copy()
 
-        for epoch in range(epochs):
-            self.current_epoch = epoch
-            self.epoch()
-            self.eval()
+            self.val_losses = self.losses.copy()
+            self.val_image_losses = self.losses.copy()
+            self.val_movements_losses = self.losses.copy()
 
-        torch.save(self.model.state_dict(), "model")
-        self.save_results("train-results.txt", self.losses, self.image_losses, self.movements_losses)
-        self.save_results("val-results.txt", self.val_losses, self.val_image_losses, self.val_movements_losses)
+            for epoch in range(epochs):
+                self.current_epoch = epoch
+                self.epoch()
+                self.eval()
+
+            torch.save(self.model.state_dict(), "model")
+            self.save_results(
+                "train-results.txt",
+                self.losses,
+                self.image_losses,
+                self.movements_losses,
+            )
+            self.save_results(
+                "val-results.txt",
+                self.val_losses,
+                self.val_image_losses,
+                self.val_movements_losses,
+            )
