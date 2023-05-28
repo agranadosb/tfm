@@ -1,14 +1,15 @@
 import random
-from typing import List, Tuple
+from typing import List, Tuple, Sequence
 
 import numpy as np
 import torch
 import torchvision
+from torch import Tensor
 from torch.nn.functional import one_hot
+from torch.utils.data import Dataset
 from torchvision import transforms
 
-from tfm.constants import ORDERED_ORDER, MOVEMENTS, MOVEMENT_TO_LABEL
-from tfm.utils.data import to_numpy
+from tfm.constants import ORDERED_ORDER, MOVEMENTS, MOVEMENT_TO_LABEL, LABEL_TO_MOVEMENT
 from tfm.utils.puzzle import has_correct_order
 
 
@@ -26,38 +27,33 @@ class Puzzle8MnistGenerator:
         8 0 4
         7 6 5
         ```
-    different_digits: int = 10
-        Diversity of the digits. If `different_digits` is set to 10 it means
-        that each of the digits will have 10 different shapes."""
+    """
 
     def __init__(
         self,
         train: bool = True,
         order: List[int] = ORDERED_ORDER,
-        different_digits: int = 10,
     ):
         self.train = train
         self.size = 28 * 3
         self.dataset = torchvision.datasets.MNIST(
             root="./data", train=train, download=True, transform=transforms.ToTensor()
         )
-        self.order = to_numpy(order)
+        self.order = torch.IntTensor(order).to(torch.int8)
 
         if not has_correct_order(order):
-            raise ValueError("The list must have only the next values")
+            raise ValueError(
+                "The list must have only the next values [0, 1, 2, 3, 4, 5, 6, 7, 8]"
+            )
 
-        self.indices = {
-            index: np.zeros(different_digits, dtype=np.int16) for index in range(10)
-        }
+        self.indices = {index: np.zeros(10, dtype=np.int16) for index in range(10)}
         index_number = {index: -1 for index in range(10)}
         completed = np.zeros(10, dtype=bool)
         for index in range(len(self.dataset)):
             _, digit = self.dataset[index]
 
-            completed[digit] = (
-                completed[digit] or index_number[digit] == different_digits - 1
-            )
-            current_digit_list_index = (index_number[digit] + 1) % different_digits
+            completed[digit] = completed[digit] or index_number[digit] == 9
+            current_digit_list_index = (index_number[digit] + 1) % 10
 
             index_number[digit] = current_digit_list_index
             self.indices[digit][current_digit_list_index] = index
@@ -65,111 +61,165 @@ class Puzzle8MnistGenerator:
             if completed.all():
                 break
 
-        self.base_image = torch.zeros((28 * 3, 28 * 3))
+    def is_beyond_bounds(self, index: int) -> bool:  # noqa
+        return index < 0 or index > 8
 
-    def random_permutation(self, current_order: np.ndarray, zero_index: int) -> Tuple[int, int]:
-        """Returns a new order with one random movement from a current order.
+    def is_incorrect_left(self, index: int, movement: int) -> bool:  # noqa
+        return index % 3 == 0 and movement == -1
 
-        Parameters
-        ----------
-        current_order: np.ndarray
-            Current order of the puzzle. This parameter will be modified, to
-            prevent it copy the parameter before calling the function.
-        zero_index:
-            Index where the zero is at.
+    def is_incorrect_right(self, index: int, movement: int) -> bool:  # noqa
+        return index % 3 == 2 and movement == 1
 
-        Returns
-        -------
-        movement: int
-            Movement selected, could be one of:
-                 - 3 -> Up
-                 - -3 -> Bottom
-                 - 1 -> Right
-                 - -1 -> Left
-        new_index: int
-            New index of the zero on the order.
-        """
-        random_movement = random.choice(MOVEMENTS)
-        new_index = zero_index + random_movement
+    def is_possible(self, zero_index: int, movement: int) -> bool:
+        new_index = zero_index + movement
 
-        beyond_bounds = new_index < 0 or new_index > 8
-        incorrect_left = zero_index % 3 == 0 and random_movement == -1
-        incorrect_right = zero_index % 3 == 2 and random_movement == 1
+        return not (
+            self.is_beyond_bounds(new_index)
+            or self.is_incorrect_left(zero_index, movement)
+            or self.is_incorrect_right(zero_index, movement)
+        )
 
-        if beyond_bounds or incorrect_left or incorrect_right:
-            random_movement = -1 * random_movement
+    def zero_index(self, order: Tensor) -> Union[int, np.int]:  # noqa
+        return np.where(order == 0)[0][0]
+
+    def move(self, order: Tensor, zero_index: int, movement: int) -> Tuple[Tensor, int]:
+        new_index = zero_index + movement
+
+        if not self.is_possible(zero_index, movement):
+            random_movement = -1 * movement
             new_index = zero_index + random_movement
 
-        current_order[[zero_index, new_index]] = current_order[new_index], 0
+        current_order = order.clone()
 
-        return random_movement, new_index
+        current_order[zero_index] = current_order[new_index]
+        current_order[new_index] = 0
 
-    def get_image(self, sequence: np.ndarray) -> torch.Tensor:
-        digits_selection = np.zeros(len(sequence), dtype=np.int16)
-        for index, digit in enumerate(sequence):
-            digits_selection[index] = np.random.choice(self.indices[digit])
+        return current_order, new_index
 
-        return self._get(digits_selection)[0]
+    def all_moves(
+        self, order: Tensor, zero_index: int
+    ) -> Tuple[Tensor, int, int, Tensor]:
+        new_orders = torch.zeros((4, 9), dtype=torch.int8)
+        applied_movements = torch.zeros(4, dtype=torch.int64)
+        applied_movements += 4
+        raw_movements = applied_movements.clone()
 
-    def get_batch(self, batch_size: int, to_label: bool = True, to_one_hot: bool = True, shuffle: bool = True) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        data = torch.zeros((batch_size * 4, 1, self.size, self.size), dtype=torch.float)
-        movements = torch.zeros(batch_size * 4, dtype=torch.int64)
-        transitions = torch.zeros((batch_size * 4, 1, self.size, self.size), dtype=torch.float)
-        current_order = self.order.copy()
-        zero_index = 4
+        for index, movement in enumerate(MOVEMENTS):
+            if self.is_possible(zero_index, movement):
+                new_order, _ = self.move(order, zero_index, movement)
 
-        for i in range(batch_size * 4):
-            previous_order = current_order.copy()
-            source = self.get_image(previous_order)
-            data[i] = torch.unsqueeze(source, 0)
+                new_orders[index] = new_order
+                applied_movements[index] = MOVEMENT_TO_LABEL[movement]
+                raw_movements[index] = movement
 
-            movement, zero_index = self.random_permutation(current_order, zero_index)
+        movement_to_apply = np.random.choice(raw_movements[raw_movements != 4])
+        order, zero_index = self.move(order, zero_index, movement_to_apply)
 
-            transition = self.get_image(current_order)
+        return (
+            order,
+            zero_index,
+            MOVEMENT_TO_LABEL[movement_to_apply],
+            applied_movements,
+        )
 
-            transitions[i] = torch.unsqueeze(transition, 0)
-            if to_label:
-                movement = MOVEMENT_TO_LABEL[movement]
+    def random_move(
+        self, current_order: Tensor, zero_index: int
+    ) -> Tuple[Tensor, int, int]:
+        movement = random.choice(MOVEMENTS)
+        new_order, new_index = self.move(current_order, zero_index, movement)
+        return new_order, new_index, MOVEMENT_TO_LABEL[movement]
+
+    def random_sequence(
+        self, size: int, all_moves: bool = False
+    ) -> Tuple[Tensor, Tensor]:
+        order = self.order.clone()
+        zero_index = self.zero_index(order)
+
+        total_size = size * 4
+        moves_size = total_size
+        if all_moves:
+            moves_size = (total_size, 4)
+
+        orders = torch.zeros((total_size, 9), dtype=torch.int8)
+        movements = torch.zeros(moves_size, dtype=torch.int64)
+
+        for i in range(total_size):
+            method = self.random_move
+            if all_moves:
+                method = self.all_moves
+
+            orders[i] = order
+            order, zero_index, *_, movement = method(order, zero_index)
             movements[i] = movement
 
-        if to_one_hot:
-            movements = one_hot(movements, num_classes=4)
+        choices = np.random.choice(np.arange(0, total_size), size)
 
-        permutation = torch.randperm(batch_size * 4)
+        return orders[choices], movements[choices]
 
-        data = data[permutation][:batch_size]
-        transitions = transitions[permutation][:batch_size]
-        movements = movements[permutation][:batch_size]
-
-        data.requires_grad = True
-
-        return data, transitions, movements
-
-    def _get(self, indices: np.ndarray) -> Tuple[torch.Tensor, np.ndarray]:
+    def get(self, order: Sequence) -> torch.Tensor:
         """Returns the 8-puzzle wrote on 'sequence'.
 
         Parameters
         ----------
-        indices: np.ndarray
+        order: np.ndarray
             Indices of the digits on the dataset.
 
         Returns
         -------
-        Tuple[torch.Tensor, np.ndarray]
-            Image of the 8-Puzzle generated.
-            Order of the digits on the mnist puzzle."""
-        digits = np.zeros(9, dtype=np.int16)
+        torch.Tensor
+            Image of the 8-Puzzle generated."""
+        base_image = torch.zeros((28 * 3, 28 * 3))
         for column in range(3):
             for row in range(3):
                 ymin = column * 28
                 xmin = row * 28
                 ymax = ymin + 28
                 xmax = xmin + 28
+
                 index = row * 3 + column
+                digit = order[index].item()
 
-                image, digit = self.dataset[indices[index]]
+                image, _ = self.dataset[np.random.choice(self.indices[digit])]
 
-                digits[index] = digit
-                self.base_image[xmin:xmax, ymin:ymax] = image
+                base_image[xmin:xmax, ymin:ymax] = image
 
-        return self.base_image, digits
+        return base_image
+
+
+class Puzzle8MnistDataset(Dataset):
+    def __init__(self, batches: int, batch_size: int):
+        self.batch_size = batch_size
+        self.batches = batches
+        self._length = batches * batch_size
+
+        self.data = Puzzle8MnistGenerator(order=[1, 2, 3, 8, 0, 4, 7, 6, 5])
+
+        self.orders = torch.zeros((self._length, 9), dtype=torch.int8)
+        self.movements = torch.zeros((self._length, 4), dtype=torch.int64)
+        for i in range(batches):
+            current_index = i * batch_size
+            orders, moves = self.data.random_sequence(batch_size, all_moves=True)
+
+            self.orders[current_index : current_index + batch_size] = orders
+            self.movements[current_index : current_index + batch_size] = moves
+
+        self.movements = one_hot(self.movements, num_classes=5)
+
+    def __len__(self):
+        return self.batches * self.batch_size
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        order = self.orders[idx]
+        movement = self.movements[idx]
+
+        image = self.data.get(order)
+        images_moved = torch.zeros((4, 28 * 3, 28 * 3))
+        for index, move in enumerate(movement):
+            if torch.all(move[-1] != 1):
+                zero_index = self.data.zero_index(order)
+                new_order, _ = self.data.move(
+                    order, zero_index, LABEL_TO_MOVEMENT[index]
+                )
+                images_moved[index] = self.data.get(new_order)
+
+        return image, images_moved, movement
