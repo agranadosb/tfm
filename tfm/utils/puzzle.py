@@ -20,7 +20,7 @@ def has_correct_order(order: Union[np.asarray, List[int], Tuple[int, ...]]) -> b
     bool
         True if the order is correct false otherwise."""
     return all(
-        map(lambda items: items[0] == items[1], zip(sorted(order), ORDERED_ORDER))
+        map(lambda items: items[0] == items[1], zip(sorted(order), list(range(9))))
     ) and len(order) == len(ORDERED_ORDER)
 
 

@@ -87,8 +87,8 @@ class Puzzle8MnistGenerator:
 
      - Right movement   :  1 or 0
      - Left movement    : -1 or 1
-     - Top movement     :  3 or 2
-     - Bottom movement  : -3 or 3
+     - Bottom movement  : -3 or 2
+     - Top movement     :  3 or 3
 
     Parameters
     ----------
@@ -271,9 +271,9 @@ class Puzzle8MnistGenerator:
             True if the movement is possible, False otherwise.
         """
         return not (
-                self._is_beyond_bounds(zero_index, movement)
-                or self._is_incorrect_left(zero_index, movement)
-                or self._is_incorrect_right(zero_index, movement)
+            self._is_beyond_bounds(zero_index, movement)
+            or self._is_incorrect_left(zero_index, movement)
+            or self._is_incorrect_right(zero_index, movement)
         )
 
     def zero_index(self, order: Tensor) -> int:  # noqa
@@ -346,7 +346,9 @@ class Puzzle8MnistGenerator:
 
         return self._move(order, zero_index, movement)[0]
 
-    def _move(self, order: Tensor, zero_index: int, movement: int) -> Tuple[Tensor, int]:  # noqa
+    def _move(  # noqa
+        self, order: Tensor, zero_index: int, movement: int
+    ) -> Tuple[Tensor, int]:
         """
         Move the zero digit on the order based on the movement.
 
@@ -388,9 +390,7 @@ class Puzzle8MnistGenerator:
 
         return new_order, new_index
 
-    def _all_moves(
-            self, order: Tensor, zero_index: int
-    ) -> Tuple[Tensor, int, int, Tensor]:
+    def _all_moves(self, order: Tensor, zero_index: int) -> Tuple[Tensor, int, Tensor]:
         """
         Get all the possible moves from the current order.
 
@@ -419,10 +419,9 @@ class Puzzle8MnistGenerator:
 
         Returns
         -------
-        Tuple[Tensor, int, int, Tensor]
-            New order, new index of the zero digit, label of the movement
-            applied and labels of the movements or 4 if the movement is not
-            possible.
+        Tuple[Tensor, int, Tensor]
+            New order, new index of the zero digit and labels of the movements
+            or 4 if the movement is not possible.
         """
         movements_labels = torch.full((4,), 4, dtype=torch.int64)
         movements = movements_labels.clone()
@@ -438,12 +437,11 @@ class Puzzle8MnistGenerator:
         return (
             order,
             zero_index,
-            MOVEMENT_TO_LABEL[movement_to_apply],
             movements_labels,
         )
 
     def random_move(
-            self, current_order: Tensor, zero_index: int
+        self, current_order: Tensor, zero_index: int
     ) -> Tuple[Tensor, int, int]:
         """
         Get a random move from the current order.
@@ -482,7 +480,7 @@ class Puzzle8MnistGenerator:
         return new_order, new_index, MOVEMENT_TO_LABEL[movement]
 
     def random_sequence(
-            self, size: int, all_moves: bool = False
+        self, size: int, all_moves: bool = False
     ) -> Tuple[Tensor, Tensor]:
         """
         Get a random sequence of unordered moves from the original order.
@@ -526,7 +524,7 @@ class Puzzle8MnistGenerator:
 
         for i in range(total_size):
             orders[i] = order
-            order, zero_index, *_, movement = method(order, zero_index)
+            order, zero_index, movement = method(order, zero_index)
             movements[i] = movement
 
         choices = np.random.choice(np.arange(0, total_size), size)
@@ -635,7 +633,7 @@ class Puzzle8MnistDataset(Dataset):
         Tensor
             New order.
         """
-        images_moved = torch.zeros((4, 84, 84))
+        images_moved = torch.zeros((4, self.data.size, self.data.size))
         for index, move in enumerate(movements):
             if torch.any(move[-1] == 1):
                 images_moved[index] = self.data.get(
