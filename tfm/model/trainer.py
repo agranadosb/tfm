@@ -17,17 +17,23 @@ class Trainer(pl.LightningModule):
         self,
         model: Unet,
         lr: float = 1e-3,
-        weight_decay: float = 1e-3
+        weight_decay: float = 1e-3,
+        num_movement: int = 4,
     ):
+        # TODO: Integrate mlflow as logger instead of tensorboard
+        # https://mlflow.org/docs/latest/index.html
+        # TODO: Use ray-tune for hyperparameter tuning
+        # https://docs.ray.io/en/latest/tune/examples/tune-pytorch-lightning.html
         super().__init__()
         self.model = model
         self.lr = lr
         self.weight_decay = weight_decay
         self.accuracy = Accuracy(task="multiclass", num_classes=4)
 
-        self.loss_fn_images = nn.MSELoss()
-        self.loss_fn_movements = nn.MSELoss()
-        self.confusion_matrix = np.zeros((4, 4))
+        self.loss_fn_images = nn.MSELoss(reduction="none")
+        self.loss_fn_movements = nn.MSELoss(reduction="none")
+        self.num_movement = num_movement
+        self.confusion_matrix = np.zeros((num_movement, num_movement))
 
     def forward(self, batch, batch_idx, step):
         x, y, m = batch
@@ -35,34 +41,28 @@ class Trainer(pl.LightningModule):
         m = m.to(torch.float32)
         y_pred, m_pred = self.model(x)
 
-        images_loss = torch.zeros((1,)).to(self.device)
-        movements_loss = torch.zeros((1,)).to(self.device)
-        movement_selected = torch.zeros(m_pred.shape).to(self.device)
-        for batch in range(m_pred.shape[0]):
-            previous_loss = torch.full((1,), 1e6).to(self.device)
-            previous_image_loss = torch.zeros(1).to(self.device)
-            previous_movement_loss = torch.zeros(1).to(self.device)
-            movement_selected_id = 0
-            for i in range(4):
-                if m[batch, i, -1] != 1:
-                    image_loss = self.loss_fn_images(y_pred[batch], y[batch, :, i])
-                    movement_loss = self.loss_fn_movements(m_pred[batch], m[batch, i, :-1])
+        images_losses = self.loss_fn_images(
+            y, y_pred.repeat([1, self.num_movement, 1, 1])
+        ).mean(dim=(-1, -2))
+        movements_losses = self.loss_fn_movements(
+            m[..., :self.num_movement], m_pred.unsqueeze(dim=-1).repeat([1, 1, self.num_movement])
+        ).mean(dim=-1)
+        total_losses = images_losses + movements_losses
 
-                    total_loss = image_loss + movement_loss
+        # Set not allowed to max value
+        allowed = m[..., self.num_movement] == 1
+        total_losses[allowed] = 1e6
+        images_losses[allowed] = 1e6
+        movements_losses[allowed] = 1e6
 
-                    if total_loss < previous_loss:
-                        previous_loss = total_loss
-                        previous_image_loss = image_loss
-                        previous_movement_loss = movement_loss
-                        movement_selected_id = i
+        images_loss = images_losses.min(dim=-1).values.mean()
+        movements_loss = movements_losses.min(dim=-1).values.mean()
+        movements_selected = total_losses.argmin(dim=-1)
+        movements_predicted = m_pred.argmax(dim=-1)
 
-            movement_selected[batch, movement_selected_id] = 1
-            images_loss += previous_image_loss
-            movements_loss += previous_movement_loss
-
-        accuracy = self.accuracy(m_pred.argmax(1), movement_selected.argmax(1))
+        accuracy = self.accuracy(movements_predicted, movements_selected)
         confusion_matrix = metrics.confusion_matrix(
-            m_pred.argmax(1).cpu(), movement_selected.argmax(1).cpu(), labels=list(range(4))
+            movements_predicted.cpu(), movements_selected.cpu(), labels=list(range(4))
         )
 
         self.confusion_matrix += confusion_matrix
@@ -107,12 +107,13 @@ class Trainer(pl.LightningModule):
         )
 
     def on_train_epoch_end(self) -> None:
+        # TODO: Check why the confusion matrix is not plotted
         self.plot_confusion_matrix("train")
-        self.confusion_matrix = np.zeros((4, 4))
+        self.confusion_matrix = np.zeros((self.num_movement, self.num_movement))
 
     def on_validation_epoch_end(self) -> None:
         self.plot_confusion_matrix("val")
-        self.confusion_matrix = np.zeros((4, 4))
+        self.confusion_matrix = np.zeros((self.num_movement, self.num_movement))
 
     def configure_optimizers(self):
         optimizer = optim.AdamW(
