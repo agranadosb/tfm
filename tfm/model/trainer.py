@@ -1,373 +1,121 @@
-from dataclasses import dataclass
-from typing import Tuple, Optional, List
-
-import torch
+import lightning.pytorch as pl
+import numpy as np
+import pandas as pd
+import seaborn
 import torchvision
-import tqdm as tqdm
-from torch import nn, optim, Tensor
-from torch.cuda.amp import GradScaler
-from torch.nn.utils import clip_grad_norm_
-from torch.utils.tensorboard import SummaryWriter
-from torchmetrics.functional import accuracy, precision, recall
+from matplotlib import pyplot as plt
+from sklearn import metrics
+import torch
+from torch import nn, optim
+from torchmetrics import Accuracy
 
-from tfm.constants import LABEL_TO_MOVEMENT
-from tfm.data.puzzle import Puzzle8MnistGenerator
-from tfm.model.net import (
-    GeneralResnetUnet,
-    ResNetBlock,
-    ConvBlock,
-    BaseEncoder,
-    BaseDecoder,
-    MovementsNet,
-)
+from tfm.model.base import Unet
 
 
-@dataclass
-class Configuration:
-    batch_size: int
-    batches: int
-    show_eval_samples: Optional[int] = 3
-    shuffle: bool = True
-
-
-@dataclass
-class LossItem:
-    transitions: Tensor
-    predictions: Tensor
-    movements: Tensor
-    predictions_movements: Tensor
-
-
-class UnetMultiModalTrainer:
-    def __init__(self, conf: Configuration):
-        self.conf = conf
-        self.current_epoch = 0
-        self.epochs = 0
-        self.step_name = "none"
-
-        self.puzzle = Puzzle8MnistGenerator(order=[1, 2, 3, 8, 0, 4, 7, 6, 5])
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        self.encoder_blocks = [(1, 64), (64, 128), (128, 256)]
-        self.decoder_blocks = [(512, 256), (256, 128), (128, 64)]
-        self.conv_movements_blocks = [
-            (512, 512),
-            (512, 256),
-            (256, 256),
-            (256, 128),
-            (128, 128),
-            (128, 64),
-            (64, 32),
-        ]
-        # 32 * 8 * 8
-        self.dense_movements_blocks = [(2048, 512), (512, 64), (64, 8)]
-
-        self.encoder_layer = lambda in_channels, out_channels: ConvBlock(
-            in_channels, out_channels
-        )
-        self.decoder_layer = lambda in_channels, out_channels: ConvBlock(
-            in_channels, out_channels
-        )
-
-        self.encoder_layer = lambda in_channels, out_channels: ResNetBlock(
-            in_channels, out_channels, out_channels
-        )
-        self.decoder_layer = lambda in_channels, out_channels: ResNetBlock(
-            in_channels, in_channels, out_channels
-        )
-
-        self.conv_movements_layer = lambda in_channels, out_channels: ResNetBlock(
-            in_channels, out_channels, out_channels
-        )
-
-        self.encoder_net = BaseEncoder(self.encoder_blocks, self.encoder_layer)
-        self.decoder_net = BaseDecoder(self.decoder_blocks, self.decoder_layer, True)
-        self.movements_net = MovementsNet(
-            self.conv_movements_blocks,
-            self.dense_movements_blocks,
-            self.conv_movements_layer,
-        )
-
-        self.writer = None
-        self.model = GeneralResnetUnet(
-            self.encoder_net, self.decoder_net, self.movements_net
-        )
-
-        self.image_criterion = nn.MSELoss()
-        self.movements_criterion = nn.CrossEntropyLoss()
-        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
-
-        self.losses = []
-        self.image_losses = []
-        self.movements_losses = []
-
-        self.val_losses = []
-        self.val_image_losses = []
-        self.val_movements_losses = []
-
-        self.total_loss = torch.Tensor()
-        self.total_images_loss = torch.Tensor()
-        self.total_movements_loss = torch.Tensor()
-        self.total_accuracy = torch.Tensor()
-        self.total_precision = torch.Tensor()
-        self.total_recall = torch.Tensor()
-
-    def samples(self) -> Tuple[Tensor, Tensor, Tensor]:
-        images, transitions, movements = self.puzzle.get_batch(self.conf.batch_size)
-        images = torchvision.transforms.Resize((64, 64))(images)
-        transitions = torchvision.transforms.Resize((64, 64))(transitions)
-
-        images = images.to(self.device)
-        transitions = transitions.to(self.device)
-        movements = movements.to(self.device).to(torch.float32)
-
-        return images, transitions, movements
-
-    def loss(
+class Trainer(pl.LightningModule):
+    def __init__(
         self,
-        loss_item: LossItem,
-        weights: Tuple[float, float, float] = (0.75, 0.25, 10.0),
-    ) -> Tuple[Tensor, Tensor, Tensor]:
-        images_loss = self.image_criterion(loss_item.transitions, loss_item.predictions)
-        movements_loss = self.movements_criterion(
-            loss_item.movements, loss_item.predictions_movements
-        )
-
-        total_loss = images_loss + movements_loss
-
-        normalized_images_loss = (images_loss / total_loss) * weights[0] * weights[2]
-        normalized_movements_loss = (
-            (movements_loss / total_loss) * weights[1] * weights[2]
-        )
-
-        return (
-            normalized_images_loss + normalized_movements_loss,
-            normalized_images_loss,
-            normalized_movements_loss,
-        )
-
-    def update_progress(self, progress_bar: tqdm.tqdm, message: str):
-        progress_bar.set_description(
-            f"{self.model.__class__.__name__} "
-            f"{self.device} -> "
-            f"Epoch {self.current_epoch:3d}/{self.epochs:3d} "
-            f"{message}"
-        )
-        progress_bar.update(1)
-
-    def movements_metrics(
-        self, predictions_movements: Tensor, movements: Tensor
-    ) -> Tuple[Tensor, Tensor, Tensor]:
-        one_hot_prediction_movements = torch.zeros(predictions_movements.size()).to(
-            self.device
-        )
-        one_hot_prediction_movements[:, torch.argmax(predictions_movements, dim=1)] = 1
-
-        batch_accuracy = accuracy(one_hot_prediction_movements, movements, "binary")
-        batch_precision = precision(one_hot_prediction_movements, movements, "binary")
-        batch_recall = recall(one_hot_prediction_movements, movements, "binary")
-
-        return batch_accuracy, batch_precision, batch_recall
-
-    def create_metrics(self):
-        self.total_loss = torch.zeros(1).to(self.device)
-        self.total_images_loss = torch.zeros(1).to(self.device)
-        self.total_movements_loss = torch.zeros(1).to(self.device)
-
-        self.total_accuracy = torch.zeros(1).to(self.device)
-        self.total_precision = torch.zeros(1).to(self.device)
-        self.total_recall = torch.zeros(1).to(self.device)
-
-    def step(
-        self,
-        batch: int,
-        progress_bar: tqdm.tqdm,
-    ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
-        images, transitions, movements = self.samples()
-
-        predictions, predictions_movements = self.model(images)
-
-        batch_accuracy, batch_precision, batch_recall = self.movements_metrics(
-            predictions_movements, movements
-        )
-
-        loss_item = LossItem(transitions, predictions, movements, predictions_movements)
-        loss, images_loss, movements_loss = self.loss(loss_item)
-
-        self.total_loss += loss.detach()
-        self.total_images_loss += images_loss.detach()
-        self.total_movements_loss += movements_loss.detach()
-
-        self.total_accuracy += batch_accuracy.detach()
-        self.total_precision += batch_precision.detach()
-        self.total_recall += batch_recall.detach()
-
-        batch = torch.Tensor([batch]).to(self.device)
-        message = (
-            f"{self.step_name} loss {(self.total_loss / batch).item():3.5f} "
-            f"images loss {(self.total_images_loss / batch).item():3.5f} "
-            f"movements metrics: loss {(self.total_movements_loss / batch).item():3.5f} "
-            f"accuracy {(self.total_accuracy / batch).item():2.4%} "
-            f"precision {(self.total_precision / batch).item():.4f} "
-            f"recall {(self.total_recall / batch).item():.4f}"
-        )
-        self.update_progress(progress_bar, message)
-
-        return loss, predictions, predictions_movements, images, transitions, movements
-
-    def epoch(self):
-        self.create_metrics()
-        self.step_name = "train"
-        scaler = GradScaler()
-        with tqdm.tqdm(total=self.conf.batches) as progress_bar:
-            for batch in range(1, self.conf.batches + 1):
-                with torch.cuda.amp.autocast():
-                    loss, *_ = self.step(batch, progress_bar)
-
-                scaler.scale(loss).backward()
-                clip_grad_norm_(self.model.parameters(), 5)
-                if (batch + 1) % 2 == 0:
-                    scaler.step(self.optimizer)
-
-                    scaler.update()
-
-                    self.optimizer.zero_grad(set_to_none=True)
-
-        self.writer.add_scalar(
-            "Loss/train", self.total_loss.detach().item(), self.current_epoch
-        )
-        self.writer.add_scalar(
-            "Images-Loss/train",
-            self.total_images_loss.detach().item(),
-            self.current_epoch,
-        )
-        self.writer.add_scalar(
-            "Movements-Loss/train",
-            self.total_movements_loss.detach().item(),
-            self.current_epoch,
-        )
-        self.losses[self.current_epoch] = self.total_loss.detach().item()
-        self.image_losses[self.current_epoch] = self.total_images_loss.detach().item()
-        self.movements_losses[
-            self.current_epoch
-        ] = self.total_movements_loss.detach().item()
-
-    def eval(self):
-        self.create_metrics()
-        self.step_name = "eval"
-
-        batches = self.conf.batches // 2
-        with tqdm.tqdm(total=batches) as progress_bar:
-            for batch in range(1, batches + 1):
-                with torch.no_grad():
-                    (
-                        loss,
-                        predictions,
-                        predictions_movements,
-                        images,
-                        transitions,
-                        movements,
-                    ) = self.step(batch, progress_bar)
-
-                    if self.conf.show_eval_samples:
-                        results: List[Tensor] = [  # noqa
-                            None for _ in range(self.conf.show_eval_samples * 3)
-                        ]
-
-                        movements_results = ""
-                        for i in range(self.conf.show_eval_samples):
-                            results[3 * i] = images[i]
-                            results[3 * i + 1] = predictions[i]
-                            results[3 * i + 2] = transitions[i]
-
-                            prediction_movement = LABEL_TO_MOVEMENT[
-                                torch.argmax(predictions_movements[i]).item()
-                            ]
-                            ground_truth_movement = LABEL_TO_MOVEMENT[
-                                torch.argmax(movements[i]).item()
-                            ]
-                            movements_results += (
-                                f"| {ground_truth_movement} {prediction_movement}"
-                            )
-
-                        grid = torchvision.utils.make_grid(results, padding=20)
-                        self.writer.add_image(
-                            f"Images-{batch}", grid, self.current_epoch
-                        )
-                        self.writer.add_text(
-                            f"Movements-{batch}", movements_results, self.current_epoch
-                        )
-
-        self.writer.add_scalar(
-            "Loss/val", self.total_loss.detach().item(), self.current_epoch
-        )
-        self.writer.add_scalar(
-            "Images-Loss/val",
-            self.total_images_loss.detach().item(),
-            self.current_epoch,
-        )
-        self.writer.add_scalar(
-            "Movements-Loss/val",
-            self.total_movements_loss.detach().item(),
-            self.current_epoch,
-        )
-        self.val_losses[self.current_epoch] = self.total_loss.detach().item()
-        self.val_image_losses[
-            self.current_epoch
-        ] = self.total_images_loss.detach().item()
-        self.val_movements_losses[
-            self.current_epoch
-        ] = self.total_movements_loss.detach().item()
-
-    def save_results(
-        self,
-        filename: str,
-        losses: List[float],
-        images_loss: List[float],
-        movements_loss: List[int],
+        model: Unet,
+        lr: float = 1e-3,
+        weight_decay: float = 1e-3
     ):
-        with open(filename, "w") as file:
-            file.write("epoch,loss,image_loss,movement_loss\n")
-            for index, (loss, image_loss, movements_loss) in enumerate(
-                zip(losses, images_loss, movements_loss)
-            ):
-                file.write(f"{index},{loss},{image_loss},{movements_loss}")
+        super().__init__()
+        self.model = model
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.accuracy = Accuracy(task="multiclass", num_classes=4)
 
-    def train(self, epochs: int):
-        with SummaryWriter("runs/unet+") as writer:
-            self.writer = writer
+        self.loss_fn_images = nn.MSELoss()
+        self.loss_fn_movements = nn.MSELoss()
+        self.confusion_matrix = np.zeros((4, 4))
 
-            self.model.to(self.device)
-            with torch.no_grad():
-                self.writer.add_graph(
-                    self.model, torch.zeros((1, 1, 64, 64)).to(self.device)
-                )
-            self.model.train()
-            self.epochs = epochs
+    def forward(self, batch, batch_idx, step):
+        x, y, m = batch
 
-            self.losses = [-1 for _ in range(epochs)]
-            self.image_losses = self.losses.copy()
-            self.movements_losses = self.losses.copy()
+        m = m.to(torch.float32)
+        y_pred, m_pred = self.model(x)
 
-            self.val_losses = self.losses.copy()
-            self.val_image_losses = self.losses.copy()
-            self.val_movements_losses = self.losses.copy()
+        images_loss = torch.zeros((1,)).to(self.device)
+        movements_loss = torch.zeros((1,)).to(self.device)
+        movement_selected = torch.zeros(m_pred.shape).to(self.device)
+        for batch in range(m_pred.shape[0]):
+            previous_loss = torch.full((1,), 1e6).to(self.device)
+            previous_image_loss = torch.zeros(1).to(self.device)
+            previous_movement_loss = torch.zeros(1).to(self.device)
+            movement_selected_id = 0
+            for i in range(4):
+                if m[batch, i, -1] != 1:
+                    image_loss = self.loss_fn_images(y_pred[batch], y[batch, :, i])
+                    movement_loss = self.loss_fn_movements(m_pred[batch], m[batch, i, :-1])
 
-            for epoch in range(epochs):
-                self.current_epoch = epoch
-                self.epoch()
-                self.eval()
+                    total_loss = image_loss + movement_loss
 
-            torch.save(self.model.state_dict(), "model")
-            self.save_results(
-                "train-results.txt",
-                self.losses,
-                self.image_losses,
-                self.movements_losses,
-            )
-            self.save_results(
-                "val-results.txt",
-                self.val_losses,
-                self.val_image_losses,
-                self.val_movements_losses,
-            )
+                    if total_loss < previous_loss:
+                        previous_loss = total_loss
+                        previous_image_loss = image_loss
+                        previous_movement_loss = movement_loss
+                        movement_selected_id = i
+
+            movement_selected[batch, movement_selected_id] = 1
+            images_loss += previous_image_loss
+            movements_loss += previous_movement_loss
+
+        accuracy = self.accuracy(m_pred.argmax(1), movement_selected.argmax(1))
+        confusion_matrix = metrics.confusion_matrix(
+            m_pred.argmax(1).cpu(), movement_selected.argmax(1).cpu(), labels=list(range(4))
+        )
+
+        self.confusion_matrix += confusion_matrix
+
+        self.log(f"{step}_accuracy", accuracy)
+        self.log(f"{step}_image_loss", images_loss)
+        self.log(f"{step}_movement_loss", movements_loss)
+
+        img_grid = torchvision.utils.make_grid(
+            x, 16, normalize=True, scale_each=True, padding=2, pad_value=1.0,
+        )
+        self.logger.experiment.add_image(f"{step}-input-images", img_grid, self.global_step)
+        img_grid = torchvision.utils.make_grid(
+            y_pred, 16, normalize=True, scale_each=True, padding=2, pad_value=1.0,
+        )
+        self.logger.experiment.add_image(f"{step}-images", img_grid, self.global_step)
+
+        return images_loss + movements_loss
+
+    def training_step(self, batch, batch_idx):
+        return self.forward(batch, batch_idx, 'train')
+
+    def validation_step(self, batch, batch_idx):
+        self.forward(batch, batch_idx, 'val')
+
+    def plot_confusion_matrix(self, step: str):
+        class_names = ("right", "left", "top", "bottom")
+
+        dataframe = pd.DataFrame(self.confusion_matrix, index=class_names, columns=class_names)
+
+        a = plt.figure(figsize=(8, 6))
+
+        # Create heatmap
+        seaborn.heatmap(dataframe, annot=True, cbar=None, cmap="YlGnBu")
+
+        plt.title("Confusion Matrix"), plt.tight_layout()
+
+        plt.ylabel("True Class"),
+        plt.xlabel("Predicted Class")
+        self.logger.experiment.add_figure(
+            f"{step}-confusion-matrix", a, self.global_step
+        )
+
+    def on_train_epoch_end(self) -> None:
+        self.plot_confusion_matrix("train")
+        self.confusion_matrix = np.zeros((4, 4))
+
+    def on_validation_epoch_end(self) -> None:
+        self.plot_confusion_matrix("val")
+        self.confusion_matrix = np.zeros((4, 4))
+
+    def configure_optimizers(self):
+        optimizer = optim.AdamW(
+            self.parameters(), lr=self.lr, weight_decay=self.weight_decay
+        )
+        return optimizer

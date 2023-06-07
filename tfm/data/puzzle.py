@@ -635,7 +635,7 @@ class Puzzle8MnistDataset(Dataset):
         """
         images_moved = torch.zeros((4, self.data.size, self.data.size))
         for index, move in enumerate(movements):
-            if torch.any(move[-1] == 1):
+            if torch.all(move[-1] != 1):
                 images_moved[index] = self.data.get(
                     self.data.move(order, LABEL_TO_MOVEMENT[index])
                 )
@@ -648,4 +648,4 @@ class Puzzle8MnistDataset(Dataset):
         image = self.data.get(order)
         images_moved = self._apply_movement(order, movement)
 
-        return image, images_moved, movement
+        return image.unsqueeze(0), images_moved.unsqueeze(0), movement
