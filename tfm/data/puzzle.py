@@ -598,9 +598,11 @@ class Puzzle8MnistDataset(Dataset):
         Size of each batch.
     """
 
-    def __init__(self, batches: int, batch_size: int):
+    def __init__(self, batches: int, batch_size: int, size: int, transformations=None):
         self._length = batches * batch_size
-
+        self.transforms = transformations
+        self.size = size
+        self.resize = transforms.Resize((size, size))
         self.data = Puzzle8MnistGenerator(order=[1, 2, 3, 8, 0, 4, 7, 6, 5])
 
         self.orders = torch.zeros((self._length, 9), dtype=torch.int8)
@@ -633,19 +635,22 @@ class Puzzle8MnistDataset(Dataset):
         Tensor
             New order.
         """
-        images_moved = torch.zeros((4, self.data.size, self.data.size))
+        images_moved = torch.zeros((4, 1, self.size, self.size))
         for index, move in enumerate(movements):
             if torch.all(move[-1] != 1):
-                images_moved[index] = self.data.get(
+                images_moved[index] = self.resize(self.data.get(
                     self.data.move(order, LABEL_TO_MOVEMENT[index])
-                )
-        return images_moved
+                ).unsqueeze(0))
+        return images_moved.squeeze()
 
     def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor, Tensor]:
         order = self.orders[idx]
         movement = self.movements[idx]
 
-        image = self.data.get(order)
+        image = self.resize(self.data.get(order).unsqueeze(0))
         images_moved = self._apply_movement(order, movement)
 
-        return image.unsqueeze(0), images_moved.unsqueeze(0), movement
+        if self.transforms is not None:
+            image = self.transforms(image)
+
+        return image, images_moved, movement
