@@ -1,14 +1,20 @@
+import io
+
 import lightning.pytorch as pl
 import numpy as np
 import pandas as pd
 import seaborn
-import torchvision
+
+import PIL
+import wandb
 from matplotlib import pyplot as plt
 from sklearn import metrics
 import torch
 from torch import nn, optim
 from torchmetrics import Accuracy
+from torchvision.transforms.functional import to_pil_image
 
+from tfm.constants import LABEL_TO_MOVEMENT
 from tfm.model.base import Unet
 
 
@@ -20,8 +26,6 @@ class Trainer(pl.LightningModule):
         weight_decay: float = 1e-3,
         num_movement: int = 4,
     ):
-        # TODO: Integrate mlflow as logger instead of tensorboard
-        # https://mlflow.org/docs/latest/index.html
         # TODO: Use ray-tune for hyperparameter tuning
         # https://docs.ray.io/en/latest/tune/examples/tune-pytorch-lightning.html
         super().__init__()
@@ -34,6 +38,21 @@ class Trainer(pl.LightningModule):
         self.loss_fn_movements = nn.MSELoss(reduction="none")
         self.num_movement = num_movement
         self.confusion_matrix = np.zeros((num_movement, num_movement))
+        self.confusion_matrix_changes = 0
+
+    def plot_samples(self, x, movements_selected, movements_predicted, step, commit=False):
+        self.logger.experiment.log({
+            f"{step}-images": [
+                wandb.Image(
+                    to_pil_image(i),
+                    caption=(
+                        f"Movement: {LABEL_TO_MOVEMENT[ms.item()]}, "
+                        f"Predicted: {LABEL_TO_MOVEMENT[mp.item()]}"
+                    )
+                )
+                for i, ms, mp in zip(x[:4].cpu(), movements_selected, movements_predicted)
+            ]
+        }, commit=commit)
 
     def forward(self, batch, batch_idx, step):
         x, y, m = batch
@@ -71,14 +90,13 @@ class Trainer(pl.LightningModule):
         self.log(f"{step}_image_loss", images_loss)
         self.log(f"{step}_movement_loss", movements_loss)
 
-        img_grid = torchvision.utils.make_grid(
-            x, 16, normalize=True, scale_each=True, padding=2, pad_value=1.0,
-        )
-        self.logger.experiment.add_image(f"{step}-input-images", img_grid, self.global_step)
-        img_grid = torchvision.utils.make_grid(
-            y_pred, 16, normalize=True, scale_each=True, padding=2, pad_value=1.0,
-        )
-        self.logger.experiment.add_image(f"{step}-images", img_grid, self.global_step)
+        if batch_idx == 0:
+            self.plot_samples(
+                x, movements_selected, movements_predicted, f"{step}-input", commit=False
+            )
+            self.plot_samples(
+                y_pred, movements_selected, movements_predicted, f"{step}", commit=False
+            )
 
         return images_loss + movements_loss
 
@@ -88,32 +106,36 @@ class Trainer(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         self.forward(batch, batch_idx, 'val')
 
-    def plot_confusion_matrix(self, step: str):
+    def plot_confusion_matrix(self, step: str, commit: bool):
         class_names = ("right", "left", "top", "bottom")
 
         dataframe = pd.DataFrame(self.confusion_matrix, index=class_names, columns=class_names)
 
-        a = plt.figure(figsize=(8, 6))
-
-        # Create heatmap
         seaborn.heatmap(dataframe, annot=True, cbar=None, cmap="YlGnBu")
 
         plt.title("Confusion Matrix"), plt.tight_layout()
 
         plt.ylabel("True Class"),
         plt.xlabel("Predicted Class")
-        self.logger.experiment.add_figure(
-            f"{step}-confusion-matrix", a, self.global_step
-        )
+        with io.BytesIO() as output:
+            plt.savefig(output, format="png")
+            im = wandb.Image(PIL.Image.open(output))
 
-    def on_train_epoch_end(self) -> None:
-        # TODO: Check why the confusion matrix is not plotted
-        self.plot_confusion_matrix("train")
+            self.logger.experiment.log(
+                {f"{step}-confusion-matrix": im}, commit=commit
+            )
+        plt.clf()
+
+    def on_validation_epoch_start(self) -> None:
+        if self.global_step != 0:
+            self.plot_confusion_matrix("train", False)
         self.confusion_matrix = np.zeros((self.num_movement, self.num_movement))
 
     def on_validation_epoch_end(self) -> None:
-        self.plot_confusion_matrix("val")
+        if self.global_step != 0:
+            self.plot_confusion_matrix("val", True)
         self.confusion_matrix = np.zeros((self.num_movement, self.num_movement))
+        self.confusion_matrix_changes += 100
 
     def configure_optimizers(self):
         optimizer = optim.AdamW(
