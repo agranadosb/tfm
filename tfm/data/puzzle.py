@@ -6,8 +6,9 @@ import torch
 import torchvision
 from torch import Tensor
 from torch.nn.functional import one_hot
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
+import lightning.pytorch as pl
 
 from tfm.constants import ORDERED_ORDER, MOVEMENTS, MOVEMENT_TO_LABEL, LABEL_TO_MOVEMENT
 from tfm.utils.puzzle import has_correct_order
@@ -654,3 +655,27 @@ class Puzzle8MnistDataset(Dataset):
             image = self.transforms(image)
 
         return image, images_moved, movement
+
+
+class Puzzle8MnistDataModule(pl.LightningDataModule):
+    def __init__(self, batch_size: int, input_size: int, num_workers: int):
+        super().__init__()
+        self.batch_size = batch_size
+        self.input_size = input_size
+        self.num_workers = num_workers
+
+    def setup(self, stage: str):
+        transformations = torch.nn.Sequential(
+            transforms.RandomResizedCrop((self.input_size, self.input_size), scale=(0.95, 1.0)),
+            transforms.RandomRotation(15),
+            transforms.GaussianBlur(3),
+        )
+        self.training = Puzzle8MnistDataset(100, self.batch_size, self.input_size, transformations=transformations)
+        self.evaluation = Puzzle8MnistDataset(16, self.batch_size, self.input_size)
+
+    def train_dataloader(self):
+        return DataLoader(self.training, batch_size=self.batch_size, num_workers=self.num_workers)
+
+    def val_dataloader(self):
+        return DataLoader(self.evaluation, batch_size=self.batch_size, num_workers=self.num_workers)
+

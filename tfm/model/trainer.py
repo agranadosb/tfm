@@ -1,4 +1,5 @@
 import io
+from typing import Any, Dict
 
 import lightning.pytorch as pl
 import numpy as np
@@ -19,25 +20,26 @@ from tfm.model.base import Unet
 
 
 class Trainer(pl.LightningModule):
-    def __init__(
-        self,
-        model: Unet,
-        lr: float = 1e-3,
-        weight_decay: float = 1e-3,
-        num_movement: int = 4,
-    ):
+    def __init__(self, config: Dict[str, Any]):
         # TODO: Use ray-tune for hyperparameter tuning
         # https://docs.ray.io/en/latest/tune/examples/tune-pytorch-lightning.html
         super().__init__()
-        self.model = model
-        self.lr = lr
-        self.weight_decay = weight_decay
+        self.model = Unet(
+            layers=config["layers"],
+            movements_layers=config["movements_layers"],
+            movements_mid_layer=config["movements_mid_layer"],
+            out_channels=config["out_channels"],
+            movements=config["movements"],
+            block=config["block"]
+        )
+        self.lr = config["lr"]
+        self.weight_decay = config["weight_decay"]
         self.accuracy = Accuracy(task="multiclass", num_classes=4)
 
         self.loss_fn_images = nn.MSELoss(reduction="none")
         self.loss_fn_movements = nn.MSELoss(reduction="none")
-        self.num_movement = num_movement
-        self.confusion_matrix = np.zeros((num_movement, num_movement))
+        self.num_movement = config["num_movement"]
+        self.confusion_matrix = np.zeros((self.num_movement, self.num_movement))
         self.confusion_matrix_changes = 0
 
     def plot_samples(self, x, movements_selected, movements_predicted, step, commit=False):
