@@ -1,3 +1,4 @@
+import os
 import random
 from typing import List, Tuple, Sequence
 
@@ -8,7 +9,7 @@ from torch import Tensor
 from torch.nn.functional import one_hot
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-import lightning.pytorch as pl
+import pytorch_lightning as pl
 
 from tfm.constants import ORDERED_ORDER, MOVEMENTS, MOVEMENT_TO_LABEL, LABEL_TO_MOVEMENT
 from tfm.utils.puzzle import has_correct_order
@@ -107,8 +108,10 @@ class Puzzle8MnistGenerator:
             order = ORDERED_ORDER
 
         self.size = 28 * 3
+
+        # TODO: set the data path in a better way (as config param for example)
         self.dataset = torchvision.datasets.MNIST(
-            root="./data", train=True, download=True, transform=transforms.ToTensor()
+            root="/opt/proyectos/tfm/data", train=True, download=False, transform=transforms.ToTensor()
         )
         self.order = torch.IntTensor(order).to(torch.int8)
 

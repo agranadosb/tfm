@@ -1,7 +1,7 @@
 import io
 from typing import Any, Dict
 
-import lightning.pytorch as pl
+import pytorch_lightning as pl
 import numpy as np
 import pandas as pd
 import seaborn
@@ -21,15 +21,15 @@ from tfm.model.base import Unet
 
 class Trainer(pl.LightningModule):
     def __init__(self, config: Dict[str, Any]):
-        # TODO: Use ray-tune for hyperparameter tuning
-        # https://docs.ray.io/en/latest/tune/examples/tune-pytorch-lightning.html
         super().__init__()
+        self.config = config
         self.model = Unet(
             layers=config["layers"],
             movements_layers=config["movements_layers"],
-            movements_mid_layer=config["movements_mid_layer"],
             out_channels=config["out_channels"],
             movements=config["movements"],
+            input_size=config["input_size"],
+            input_channels=config["input_channels"],
             block=config["block"]
         )
         self.lr = config["lr"]
@@ -41,6 +41,9 @@ class Trainer(pl.LightningModule):
         self.num_movement = config["num_movement"]
         self.confusion_matrix = np.zeros((self.num_movement, self.num_movement))
         self.confusion_matrix_changes = 0
+
+        self.val_loss = []
+        self.val_acc = []
 
     def plot_samples(self, x, movements_selected, movements_predicted, step, commit=False):
         self.logger.experiment.log({
@@ -100,13 +103,21 @@ class Trainer(pl.LightningModule):
                 y_pred, movements_selected, movements_predicted, f"{step}", commit=False
             )
 
-        return images_loss + movements_loss
+        loss = images_loss + movements_loss
+        if step == "train":
+            return loss
+        return loss, accuracy
+
+    def on_validation_batch_end(self, out, *_):
+        loss, accuracy = out
+        self.val_loss.append(loss)
+        self.val_acc.append(accuracy)
 
     def training_step(self, batch, batch_idx):
         return self.forward(batch, batch_idx, 'train')
 
     def validation_step(self, batch, batch_idx):
-        self.forward(batch, batch_idx, 'val')
+        return self.forward(batch, batch_idx, 'val')
 
     def plot_confusion_matrix(self, step: str, commit: bool):
         class_names = ("right", "left", "top", "bottom")
@@ -139,8 +150,21 @@ class Trainer(pl.LightningModule):
         self.confusion_matrix = np.zeros((self.num_movement, self.num_movement))
         self.confusion_matrix_changes += 100
 
+        # TODO: Refactor this way of calculating the average
+        avg_loss = torch.tensor(self.val_loss).mean()
+        avg_acc = torch.tensor(self.val_acc).mean()
+        self.log("ptl/val_loss", avg_loss)
+        self.log("ptl/val_accuracy", avg_acc)
+
+        self.val_loss = []
+        self.val_acc = []
+
     def configure_optimizers(self):
         optimizer = optim.AdamW(
             self.parameters(), lr=self.lr, weight_decay=self.weight_decay
         )
         return optimizer
+
+    def on_train_start(self):
+        for key, value in self.config.items():
+            self.logger.experiment.config[key] = value

@@ -157,12 +157,20 @@ class Unet(nn.Module):
         self,
         layers: List[int],
         movements_layers: List[int],
-        movements_mid_layer: int,
         out_channels: int,
         movements: int,
+        input_size: int,
+        input_channels: int,
         block: nn.Module,
     ):
         super().__init__()
+        # TODO: Document this way of compute the layers
+        movements_mid_layer = (
+            input_size // 2 ** len(layers)
+        ) ** 2 * movements_layers[-1]
+
+        layers = [input_channels] + layers
+        movements_layers = [layers[-1] * 2] + movements_layers
         embedding_dim = layers[-1] * 2
         decoder_layers = layers[:-len(layers):-1]
 
