@@ -1,4 +1,4 @@
-ORDERED_ORDER = tuple(range(9))
+ORDERED_ORDER = [1, 2, 3, 8, 0, 4, 7, 6, 5]
 
 LEFT_RIGHT_MOVEMENTS = [1, -1]
 TOP_BOT_MOVEMENTS = [3, -3]
