@@ -1,0 +1,15 @@
+# Dataset configuration
+input_size: 96
+batch_size: 64
+num_workers: 4
+# Training configuration
+lr: 0.0009299177250712636
+weight_decay: 0.09734765783141108
+num_movement: 4
+# Start model configuration
+layers: [16, 32, 64, 128, 256]
+movements_layers: [128, 64, 32, 16, 8]
+out_channels: 1
+input_channels: 1
+movements: 4
+block: conv
