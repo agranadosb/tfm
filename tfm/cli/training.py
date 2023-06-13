@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 from typing import Dict, Any, Union
 
+import torch
 import yaml
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
@@ -77,3 +78,13 @@ def train(config: Union[Dict[str, Any], str], project, epochs: int):
             config["num_workers"]
         )
     )
+
+
+def save_checkpoint(path: str, path_to_save: str, config: str):
+    if isinstance(config, str):
+        with open(config, 'r') as stream:
+            config = yaml.safe_load(stream)
+
+            config["block"] = BLOCKS[config["block"]]
+    model = Trainer.load_from_checkpoint(path, config=config)
+    torch.save(model, path_to_save)
