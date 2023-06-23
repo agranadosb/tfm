@@ -1,4 +1,4 @@
-from tfm.model.base import ConvBlock
+from tfm.model.base import ConvBlock, ResidualBlock
 
 ORDERED_ORDER = [1, 2, 3, 8, 0, 4, 7, 6, 5]
 
@@ -9,6 +9,4 @@ MOVEMENTS = [*LEFT_RIGHT_MOVEMENTS, *TOP_BOT_MOVEMENTS]
 MOVEMENT_TO_LABEL = {1: 0, -1: 1, 3: 2, -3: 3}
 LABEL_TO_MOVEMENT = {value: key for key, value in MOVEMENT_TO_LABEL.items()}
 
-BLOCKS = {
-    "conv": ConvBlock,
-}
+BLOCKS = {"conv": ConvBlock, "residual": ResidualBlock}
