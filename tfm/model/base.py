@@ -5,11 +5,20 @@ from torch import nn
 
 
 class ConvBlock(nn.Module):
-    def __init__(self, in_features: int, out_features: int, kernel: int = 3, padding: int = 1):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        kernel: int = 3,
+        padding: int = 1,
+        activation: nn.Module = None,
+    ):
         super().__init__()
+        if activation is None:
+            activation = nn.GELU()
         self.conv = nn.Conv2d(in_features, out_features, kernel, padding=padding)
         self.bn = nn.BatchNorm2d(out_features)
-        self.relu = nn.ReLU()
+        self.relu = activation
         self.dropout = nn.Dropout2d(0.2)
 
     def forward(self, x):
@@ -17,6 +26,26 @@ class ConvBlock(nn.Module):
         x = self.bn(x)
         x = self.relu(x)
         x = self.dropout(x)
+        return x
+
+
+class ResidualBlock(nn.Module):
+    def __init__(
+        self, in_features: int, out_features: int, kernel: int = 3, padding: int = 1
+    ):
+        super().__init__()
+        self.conv1 = ConvBlock(in_features, out_features, kernel, padding)
+        self.conv2 = ConvBlock(out_features, out_features, kernel, padding)
+
+        self.skip = nn.Identity()
+        if in_features != out_features:
+            self.skip = ConvBlock(in_features, out_features, kernel, padding)
+
+    def forward(self, x):
+        skip = self.skip(x)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = x + skip
         return x
 
 
@@ -77,7 +106,9 @@ class UnetDecBlock(nn.Module):
 
 
 class UnetEmbeddingBlock(nn.Module):
-    def __init__(self, in_features: int, mid_features: int, out_features: int, block: nn.Module):
+    def __init__(
+        self, in_features: int, mid_features: int, out_features: int, block: nn.Module
+    ):
         super().__init__()
         self.input = block(in_features, out_features)
         self.mid = block(out_features, mid_features)
@@ -93,7 +124,9 @@ class UnetEmbeddingBlock(nn.Module):
 class UnetOutBlock(UnetDecBlock):
     def __init__(self, in_features: int, out_features: int, block: nn.Module):
         super().__init__(in_features, out_features, block)
-        self.out = ConvBlock(in_features, out_features, 1, padding=0)
+        self.out = ConvBlock(
+            in_features, out_features, 1, padding=0, activation=nn.ReLU()
+        )
 
 
 class UnetEncoder(nn.Module):
@@ -164,18 +197,22 @@ class Unet(nn.Module):
         block: nn.Module,
     ):
         super().__init__()
+        layers = list(layers)
+        movements_layers = list(movements_layers)
         # TODO: Document this way of compute the layers
-        movements_mid_layer = (
-            input_size // 2 ** len(layers)
-        ) ** 2 * movements_layers[-1]
+        movements_mid_layer = (input_size // 2 ** len(layers)) ** 2 * movements_layers[
+            -1
+        ]
 
         layers = [input_channels] + layers
         movements_layers = [layers[-1] * 2] + movements_layers
         embedding_dim = layers[-1] * 2
-        decoder_layers = layers[:-len(layers):-1]
+        decoder_layers = layers[: -len(layers) : -1]
 
         self.encoder = UnetEncoder(layers, block)
-        self.embedding = UnetEmbeddingBlock(layers[-1], embedding_dim, layers[-1], block)
+        self.embedding = UnetEmbeddingBlock(
+            layers[-1], embedding_dim, layers[-1], block
+        )
         self.decoder = UnetDecoder(decoder_layers, block)
 
         self.out = UnetOutBlock(decoder_layers[-1], out_channels, block)
