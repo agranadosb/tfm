@@ -2,7 +2,7 @@ import os
 import fire
 import torch
 
-from tfm.cli.inference import random_prediction, move
+from tfm.cli.inference import random_prediction, move, show_possibilities
 from tfm.cli.training import train, save_checkpoint
 from tfm.cli.tuning import hyperparameter_tuning
 
@@ -18,4 +18,5 @@ if __name__ == "__main__":
         "save-checkpoint": save_checkpoint,
         "random-prediction": random_prediction,
         "move": move,
+        "show-possibilities": show_possibilities,
     })
