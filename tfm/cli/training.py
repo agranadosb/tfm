@@ -1,7 +1,7 @@
 import os
 from typing import Dict, Any, Union
 
-import torch
+import bentoml
 import yaml
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger  # noqa
@@ -85,11 +85,17 @@ def train(config: Union[Dict[str, Any], str], project: str, epochs: int):
     )
 
 
-def save_checkpoint(path: str, path_to_save: str, config: str):
+def save_checkpoint(path: str, config: str, model_name: str):
     if isinstance(config, str):
         with open(config, "r") as stream:
             config = yaml.safe_load(stream)
 
             config["block"] = BLOCKS[config["block"]]
-    model = Trainer.load_from_checkpoint(path, config=config)
-    torch.save(model, path_to_save)
+
+    trainer = Trainer.load_from_checkpoint(path, config=config)
+    tag = bentoml.pytorch.save_model(
+        model_name,
+        trainer.model,
+        signatures={"__call__": {"batchable": True, "batch_dim": 0}}
+    )
+    print(f"Saved model: {tag}")
