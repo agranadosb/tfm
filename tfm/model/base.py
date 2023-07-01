@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple
 
 import torch
 from torch import nn
@@ -71,7 +71,7 @@ class UnetDecBlock(nn.Module):
         self.out = nn.ConvTranspose2d(in_features, out_features, 2, 2)
 
     @staticmethod
-    def crop(x, shape: torch.Size):
+    def crop(x, shape: Tuple[int, int]):
         """
         Function for cropping an image tensor: Given an image tensor and the new shape,
         crops to the center pixels (assumes that the input's size and the new size are
@@ -85,7 +85,8 @@ class UnetDecBlock(nn.Module):
             a torch.Size object with the shape you want x to have.
         """
         _, _, h, w = x.shape
-        _, _, h_new, w_new = shape
+        h_new = shape[0]
+        w_new = shape[1]
 
         ch, cw = h // 2, w // 2
         ch_new, cw_new = h_new // 2, w_new // 2
@@ -97,7 +98,7 @@ class UnetDecBlock(nn.Module):
 
     def forward(self, x, skip):
         if x.shape != skip.shape:
-            skip = self.crop(skip, x.shape)
+            skip = self.crop(skip, (skip.shape[2], skip.shape[3]))
         x = torch.cat([x, skip], dim=1)
         x = self.input(x)
         x = self.mid(x)
@@ -157,8 +158,10 @@ class UnetDecoder(nn.Module):
             ]
         )
 
-    def forward(self, x, features):
-        for block, y in zip(self.blocks, features[::-1]):
+    def forward(self, x, features: List[torch.Tensor]):
+        reversed_features = features[::-1]
+        for index, block in enumerate(self.blocks):
+            y = reversed_features[index]
             x = block(x, y)
         return x
 
