@@ -2,8 +2,6 @@ from typing import List, Tuple
 
 import torch
 
-from tfm.plots.images import plot_image
-
 
 class LightsOutGenerator:
     """
@@ -315,8 +313,29 @@ class LightsOutGenerator:
         torch.Tensor
             All possible states from the given state.
         """
-        # Use: https://stackoverflow.com/questions/59149138/how-do-you-invert-a-tensor-of-boolean-values-in-pytorch
-        result = torch.zeros(self.n * self.n, self.n, self.n)
+        state = state.reshape(self.n, self.n)
+        result = torch.zeros(self.n * self.n, self.n, self.n, dtype=torch.bool)
+
         for i in range(self.n):
             for j in range(self.n):
-                pass
+                result[i * self.n + j] = state.clone()
+
+                top_x = i - 1
+                top_y = j - 1
+                bottom_x = i + 2
+                bottom_y = j + 2
+
+                if top_x < 0:
+                    top_x = 0
+                if top_y < 0:
+                    top_y = 0
+                if bottom_x > self.n * self.n:
+                    bottom_x = self.n * self.n
+                if bottom_y > self.n * self.n:
+                    bottom_y = self.n * self.n
+
+                result[
+                    i * self.n + j, top_x:bottom_x, top_y:bottom_y
+                ] = ~state[top_x:bottom_x, top_y:bottom_y]
+
+        return result.reshape(self.n * self.n, self.n * self.n)
