@@ -7,8 +7,8 @@ TOP_BOT_MOVEMENTS = [3, -3]
 MOVEMENTS = [*LEFT_RIGHT_MOVEMENTS, *TOP_BOT_MOVEMENTS]
 
 LABEL_TO_STRING = {
-    0: "Left",
-    1: "Right",
+    0: "Right",
+    1: "Left",
     2: "Bottom",
     3: "Top",
 }

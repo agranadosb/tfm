@@ -18,13 +18,13 @@ class ConvBlock(nn.Module):
             activation = nn.GELU()
         self.conv = nn.Conv2d(in_features, out_features, kernel, padding=padding)
         self.bn = nn.BatchNorm2d(out_features)
-        self.relu = activation
+        self.activation = activation
         self.dropout = nn.Dropout2d(0.2)
 
     def forward(self, x):
         x = self.conv(x)
         x = self.bn(x)
-        x = self.relu(x)
+        x = self.activation(x)
         x = self.dropout(x)
         return x
 
