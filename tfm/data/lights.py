@@ -82,10 +82,12 @@ class LightsOutGenerator:
     ----------
     n : int
         The size of the grid.
-    size : int = 31
-        The size of a light. Default is 31.
+    size : int = 32
+        The size of a light. Default is 32.
     line_value: int = 128
         The value of the line between lights. Default is 128.
+    line_length: int = 4
+        The length of the line between lights. Default is 4.
     """
 
     def __init__(self, n: int, size: int = 32, line_value: int = 128, line_length: int = 4):
