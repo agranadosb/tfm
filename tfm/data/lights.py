@@ -1,5 +1,6 @@
 from typing import List, Tuple
 
+import numpy as np
 import torch
 
 
@@ -269,7 +270,78 @@ class LightsOutGenerator:
         torch.Tensor
             A random sequence of states.
         """
-        pass
+        total_length = length * 4
+
+        indices = np.arange(self.n * self.n)
+        result = torch.zeros(total_length, self.n, self.n, dtype=torch.bool)
+        current_state = torch.ones(self.n, self.n, dtype=torch.bool)
+        for i in range(total_length):
+            result[i] = current_state
+            action = np.random.choice(indices)
+            current_state = self._apply_action(current_state, action)
+
+        return result.reshape(
+            total_length, self.n * self.n
+        )[torch.randperm(self.n * self.n)][:length]
+
+    def _apply_action(self, state: torch.Tensor, action: int) -> torch.Tensor:
+        """
+        Applies the given action to the given state. The result is a tensor of
+        size (n, n) of the new state. The action just flips the light and the
+        lights that are on the direct neighborhood.
+
+        Parameters
+        ----------
+        state: torch.Tensor
+            The state of the game.
+        action: int
+            The action to apply. It is the index of the light to flip.
+
+        Examples
+        --------
+        Suppose a 3x3 grid of lights and a state:
+
+        ```
+        1 1 1
+        1 1 1
+        1 1 1
+        ```
+
+        Then, the action 1 flips the light 1 (that is the second light) and the
+        lights on the direct neighborhood:
+
+        ```
+        0 0 0
+        0 0 0
+        1 1 1
+        ```
+
+        Returns
+        -------
+        torch.Tensor
+            The new state.
+        """
+        new_state = state.clone()
+        i, j = divmod(action, self.n)
+        top_x = i - 1
+        top_y = j - 1
+        bottom_x = i + 2
+        bottom_y = j + 2
+
+        if top_x < 0:
+            top_x = 0
+        if top_y < 0:
+            top_y = 0
+        if bottom_x > self.n * self.n:
+            bottom_x = self.n * self.n
+        if bottom_y > self.n * self.n:
+            bottom_y = self.n * self.n
+
+        new_state[
+            top_x:bottom_x, top_y:bottom_y
+        ] = ~state[top_x:bottom_x, top_y:bottom_y]
+
+        return new_state
 
     def all_states(self, state: torch.Tensor) -> torch.Tensor:
         """
@@ -318,24 +390,7 @@ class LightsOutGenerator:
 
         for i in range(self.n):
             for j in range(self.n):
-                result[i * self.n + j] = state.clone()
-
-                top_x = i - 1
-                top_y = j - 1
-                bottom_x = i + 2
-                bottom_y = j + 2
-
-                if top_x < 0:
-                    top_x = 0
-                if top_y < 0:
-                    top_y = 0
-                if bottom_x > self.n * self.n:
-                    bottom_x = self.n * self.n
-                if bottom_y > self.n * self.n:
-                    bottom_y = self.n * self.n
-
-                result[
-                    i * self.n + j, top_x:bottom_x, top_y:bottom_y
-                ] = ~state[top_x:bottom_x, top_y:bottom_y]
+                index = i * self.n + j
+                result[index] = self._apply_action(state, index)
 
         return result.reshape(self.n * self.n, self.n * self.n)
