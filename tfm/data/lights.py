@@ -2,6 +2,8 @@ from typing import List, Tuple
 
 import torch
 
+from tfm.plots.images import plot_image
+
 
 class LightsOutGenerator:
     """
@@ -68,10 +70,10 @@ class LightsOutGenerator:
     provide a random sequence of states from the initial state and to generate
     all possible states from a given state.
 
-    The image representation of a state is a tensor of size (n * (size + 2), n * (size + 2))
+    The image representation of a state is a tensor of size (n * size, n * size)
     where size is the size of a light. The light is represented as a square of
     size (size, size) and the lights are separated by a line of size 1,
-    so the total size of a light is (size + 2, size + 2).
+    so the total size of a light is (size, size).
 
     Parameters
     ----------
@@ -83,38 +85,80 @@ class LightsOutGenerator:
         The value of the line between lights. Default is 128.
     """
 
-    def __init__(self, n: int, size: int = 30, line_value: int = 128):
+    def __init__(self, n: int, size: int = 32, line_value: int = 128, line_length: int = 1):
         self.n = n
-        self.size = size
+        self.size = size - line_length * 2
         self.line_value = line_value
+        self.line_length = line_length
 
-    def _compute_x_border(
-        self, base: int, init: int, fin: int
-    ) -> List[Tuple[int, int]]:
+    def _compute_border_coordinate(
+            self, x: int, y: int, border_type: str
+    ) -> Tuple[int, int]:
         """
-        Computes the coordinates of the x border of a light. The x border can
-        be the top or the bottom border.
+        Given a coordinate, computes the coordinate of the border of a light.
+        If the border type is "x", then the border is computed over the x-axis
+        and the coordinate of the border is (x, y). If the border type is
+        "y", then the border is computed over the y-axis and the coordinate of
+        the border is (y, x).
 
         Parameters
         ----------
+        x: int
+            X coordinate.
+        y: int
+            Y coordinate.
+        border_type: str
+            The type of border. It can be "x" that means the border is computed
+            over the x-axis or "y" that means the border is computed over the
+            y-axis.
+
+        Returns
+        -------
+        Tuple[int, int]
+            A coordinate of the border.
+        """
+        if border_type == "x":
+            return x, y
+        return y, x
+
+    def _compute_border(
+            self, border_type: str, base: int, init: int, fin: int, value: int = 1
+    ) -> List[Tuple[int, int]]:
+        """
+        Computes the coordinates of the border of a light.
+
+        Parameters
+        ----------
+        border_type: str
+            The type of border. It can be "x" that means the border is computed
+            over the x-axis or "y" that means the border is computed over the
+            y-axis.
         base: int
             The base coordinate.
         init: int
             The initial coordinate.
         fin: int
             The final coordinate.
+        value: int = 1
+            In which direction the border is computed. If value is 1, then the
+            border is computed from top to bottom. If value is -1, then the
+            border is computed from bottom to top. Default is 1.
 
         Examples
         --------
-        Suppose a 2x2 grid of lights and a size of 30. The base for the first
-        light is 0. The initial coordinate is 0 and the final coordinate
-        is 32. Then, the result is:
+        Suppose a 2x2 grid of lights, a size of 32 and a border length of 2.
+        The base for the first light is 0. The initial coordinate is 0 and the
+        final coordinate is 32. Then, the result is:
 
         ```
         (0, 0) (0, 1) (0, 2) (0, 3)
         (0, 4) (0, 5) (0, 6) (0, 7)
         ...
         (0, 28) (0, 29) (0, 30) (0, 31)
+        (1, 0) (1, 1) (1, 2) (1, 3) # The length of the border is 2, so it's
+        (1, 4) (1, 5) (1, 6) (1, 7) # necessary to add draw 2 lines.
+        ...
+        (1, 28) (1, 29) (1, 30) (1, 31)
         ```
 
         Which is the top border of the first light.
@@ -127,39 +171,17 @@ class LightsOutGenerator:
         Returns
         -------
         List[Tuple[int, int]]
-            The coordinates of the x border of a light.
-        """
-        return [
-            (index, base) for index in range(init, fin)
-        ]
-
-    def _compute_y_border(self, base: int, init: int, fin: int) -> List[Tuple[int, int]]:
-        """
-        Computes the coordinates of the y border of a light. The y border can
-        be the left or the right border.
-
-        Parameters
-        ----------
-        base: int
-            The base coordinate.
-        init: int
-            The initial coordinate.
-        fin: int
-            The final coordinate.
-
-        Examples
-        --------
-        The same applies as in the `_compute_x_border` method but instead of
-        taking y as the base coordinate, it takes x.
-
-        Returns
-        -------
-        List[Tuple[int, int]]
             The coordinates of the y border of a light.
         """
-        return [
-            (base, index) for index in range(init, fin + 1)
-        ]
+        result = []
+        for i in range(self.line_length):
+            result += [
+                self._compute_border_coordinate(
+                    base + i * value, index, border_type
+                )
+                for index in range(init, fin)
+            ]
+        return result
 
     def get(self, state: torch.Tensor) -> torch.Tensor:
         """
@@ -189,16 +211,20 @@ class LightsOutGenerator:
         torch.Tensor
             The image of the state.
         """
-        image = torch.zeros(self.n * (self.size + 2), self.n * (self.size + 2))
+        square_size = self.size + self.line_length * 2
+        image = torch.zeros(
+            self.n * square_size,
+            self.n * square_size
+        )
         for i in range(self.n):
             for j in range(self.n):
                 # Get index on the vector state
                 index = i * self.n + j
                 # Light square coordinates
-                top_x = i * (self.size + 2)
-                top_y = j * (self.size + 2)
-                bottom_x = top_x + self.size + 1
-                bottom_y = top_y + self.size + 1
+                top_x = i * square_size
+                top_y = j * square_size
+                bottom_x = top_x + square_size
+                bottom_y = top_y + square_size
 
                 # Populate light if it is on
                 if state[index] == 1:
@@ -206,10 +232,10 @@ class LightsOutGenerator:
 
                 # Create border
                 total_coordinates = (
-                    self._compute_x_border(top_y, top_x, bottom_x) +
-                    self._compute_x_border(bottom_y, top_x, bottom_x) +
-                    self._compute_y_border(top_x, top_y, bottom_y) +
-                    self._compute_y_border(bottom_x, top_y, bottom_y)
+                    self._compute_border("y", top_y, top_x, bottom_x) +
+                    self._compute_border("y", bottom_y - 1, top_x, bottom_x, -1) +
+                    self._compute_border("x", top_x, top_y, bottom_y) +
+                    self._compute_border("x", bottom_x - 1, top_y, bottom_y, -1)
                 )
 
                 x_coordinates, y_coordinates = zip(*total_coordinates)
@@ -289,4 +315,8 @@ class LightsOutGenerator:
         torch.Tensor
             All possible states from the given state.
         """
-        pass
+        # Use: https://stackoverflow.com/questions/59149138/how-do-you-invert-a-tensor-of-boolean-values-in-pytorch
+        result = torch.zeros(self.n * self.n, self.n, self.n)
+        for i in range(self.n):
+            for j in range(self.n):
+                pass
