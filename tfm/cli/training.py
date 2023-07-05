@@ -11,6 +11,7 @@ from tfm.constants import BLOCKS
 from tfm.data.lights import LightsOutDataModule
 from tfm.data.puzzle import Puzzle8MnistDataModule
 from tfm.model.trainer import Trainer
+from tfm.utils.data import current_datetime
 
 
 def train(config: Union[Dict[str, Any], str], project: str, epochs: int):
@@ -63,7 +64,7 @@ def train(config: Union[Dict[str, Any], str], project: str, epochs: int):
     if config.get("log", True):
         logger = WandbLogger(
             project=project,
-            name="full-training",
+            name=f"full-training-{current_datetime()}",
         )
         callbacks = [
             ModelCheckpoint(
