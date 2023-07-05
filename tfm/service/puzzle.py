@@ -25,7 +25,7 @@ class Puzzle8MnistService:
         result = self.model.run(image)
 
         result_image = result[0].squeeze(0).detach().to("cpu")
-        movement = LABEL_TO_STRING[
+        movement = LABEL_TO_STRING["puzzle8"][
             result[1].squeeze().argmax().detach().to("cpu").item()
         ]
 

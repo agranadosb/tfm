@@ -38,7 +38,7 @@ def show_possibilities():
         movement_index = movement.argmax().item()
         movement_str = "Not Possible"
         if movement_index < 4:
-            movement_str = LABEL_TO_STRING[movement_index]
+            movement_str = LABEL_TO_STRING["puzzle8"][movement_index]
 
         movement_list_str = (
             str(movement.numpy().tolist())
@@ -65,7 +65,7 @@ def move(order: Tuple[int], model_path: str):
         result_image = result[0].cpu().detach().squeeze()
         threshold = 0.42
         result_image[result_image < threshold] = 0
-        result_movement = LABEL_TO_MOVEMENT[
+        result_movement = LABEL_TO_MOVEMENT["puzzle8"][
             result[1].cpu().detach().argmax(dim=-1).squeeze().item()
         ]
 

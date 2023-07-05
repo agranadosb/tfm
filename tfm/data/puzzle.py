@@ -431,7 +431,7 @@ class Puzzle8MnistGenerator:
 
         for index, movement in enumerate(MOVEMENTS):
             if self.is_possible(zero_index, movement):
-                movements_labels[index] = MOVEMENT_TO_LABEL[movement]
+                movements_labels[index] = MOVEMENT_TO_LABEL["puzzle8"][movement]
                 movements[index] = movement
 
         movement_to_apply = np.random.choice(movements[movements != 4])
@@ -480,7 +480,7 @@ class Puzzle8MnistGenerator:
         if not self.is_possible(zero_index, movement):
             movement = -1 * movement
         new_order, new_index = self._move(current_order, zero_index, movement)
-        return new_order, new_index, MOVEMENT_TO_LABEL[movement]
+        return new_order, new_index, MOVEMENT_TO_LABEL["puzzle8"][movement]
 
     def random_sequence(
         self, size: int, all_moves: bool = False
@@ -642,7 +642,7 @@ class Puzzle8MnistDataset(Dataset):
         for index, move in enumerate(movements):
             if torch.all(move[-1] != 1):
                 images_moved[index] = self.resize(self.data.get(
-                    self.data.move(order, LABEL_TO_MOVEMENT[index])
+                    self.data.move(order, LABEL_TO_MOVEMENT["puzzle8"][index])
                 ).unsqueeze(0))
         return images_moved.squeeze()
 

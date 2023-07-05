@@ -8,6 +8,7 @@ from pytorch_lightning.loggers import WandbLogger  # noqa
 import pytorch_lightning as pl
 
 from tfm.constants import BLOCKS
+from tfm.data.lights import LightsOutDataModule
 from tfm.data.puzzle import Puzzle8MnistDataModule
 from tfm.model.trainer import Trainer
 
@@ -52,6 +53,10 @@ def train(config: Union[Dict[str, Any], str], project: str, epochs: int):
 
             config["block"] = BLOCKS[config["block"]]
 
+    dataset_class = Puzzle8MnistDataModule
+    if config["dataset"] == "lights-out":
+        dataset_class = LightsOutDataModule
+
     logger = None
     callbacks = None
     checkpointing = None
@@ -79,7 +84,7 @@ def train(config: Union[Dict[str, Any], str], project: str, epochs: int):
     )
     trainer.fit(
         model=Trainer(config),
-        datamodule=Puzzle8MnistDataModule(
+        datamodule=dataset_class(
             config["batch_size"], config["input_size"], config["num_workers"]
         ),
     )

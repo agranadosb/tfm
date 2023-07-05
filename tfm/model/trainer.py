@@ -16,7 +16,7 @@ from torch import nn, optim
 from torchmetrics import Accuracy
 from torchvision.transforms.functional import to_pil_image
 
-from tfm.constants import LABEL_TO_MOVEMENT
+from tfm.constants import LABEL_TO_MOVEMENT, LABEL_TO_STRING
 from tfm.model.base import Unet
 
 torch.set_float32_matmul_precision("medium")
@@ -37,7 +37,8 @@ class Trainer(pl.LightningModule):
         )
         self.lr = config["lr"]
         self.weight_decay = config["weight_decay"]
-        self.accuracy = Accuracy(task="multiclass", num_classes=4)
+        self.accuracy = Accuracy(task="multiclass", num_classes=config["num_movement"])
+        self.dataset_name = config["dataset"]
 
         self.loss_fn_images = nn.MSELoss(reduction="none")
         self.loss_fn_movements = nn.CrossEntropyLoss(reduction="none")
@@ -57,8 +58,8 @@ class Trainer(pl.LightningModule):
                     wandb.Image(
                         to_pil_image(i),
                         caption=(
-                            f"Movement: {LABEL_TO_MOVEMENT[ms.item()]}, "
-                            f"Predicted: {LABEL_TO_MOVEMENT[mp.item()]}"
+                            f"Movement: {LABEL_TO_MOVEMENT[self.dataset_name][ms.item()]}, "
+                            f"Predicted: {LABEL_TO_MOVEMENT[self.dataset_name][mp.item()]}"
                         ),
                     )
                     for i, ms, mp in iterable
@@ -68,7 +69,7 @@ class Trainer(pl.LightningModule):
         )
 
     def plot_confusion_matrix(self, step: str, commit: bool):
-        class_names = ("right", "left", "top", "bottom")
+        class_names = LABEL_TO_STRING[self.dataset_name].values()
 
         dataframe = pd.DataFrame(
             self.confusion_matrix,
@@ -132,6 +133,7 @@ class Trainer(pl.LightningModule):
         allowed = m[..., self.num_movement] == 1
         total_losses[allowed] = 1e6
         movements_selected = total_losses.argmin(dim=-1)
+        y_selected = y[batch_indices, movements_selected]
 
         images_loss = images_losses[batch_indices, movements_selected].mean()
         movements_loss = movements_losses[batch_indices, movements_selected].mean()
@@ -144,7 +146,7 @@ class Trainer(pl.LightningModule):
 
         accuracy = self.accuracy(movements_predicted, movements_selected)
         confusion_matrix = metrics.confusion_matrix(
-            movements_predicted.cpu(), movements_selected.cpu(), labels=list(range(4))
+            movements_predicted.cpu(), movements_selected.cpu(), labels=list(range(self.num_movement))
         )
 
         self.confusion_matrix += confusion_matrix
@@ -158,6 +160,7 @@ class Trainer(pl.LightningModule):
                 x, movements_selected, movements_predicted, f"{step}-input"
             )
             self.plot_samples(y_pred, movements_selected, movements_predicted, step)
+            self.plot_samples(y_selected, movements_selected, movements_predicted, f"{step}-correct")
 
         if step == "train":
             return loss
