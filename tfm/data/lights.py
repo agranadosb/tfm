@@ -288,7 +288,7 @@ class LightsOutGenerator:
 
         return result.reshape(
             total_length, self.n * self.n
-        )[torch.randperm(self.n * self.n)][:length]
+        )[torch.randperm(total_length)][:length]
 
     def _apply_action(self, state: torch.Tensor, action: int) -> torch.Tensor:
         """
@@ -427,13 +427,14 @@ class LightsOutDataset(Dataset):
     num_batches: int
         The number of batches.
     """
-    def __init__(self, n: int, batch_size: int, num_batches: int, transformations=None):
+    def __init__(self, n: int, num_batches: int, batch_size: int, transformations=None, y_transformations=None):
         super().__init__()
         self.n = n
         self.generator = LightsOutGenerator(n)
         self.batch_size = batch_size
         self.num_batches = num_batches
         self.transforms = transformations
+        self.y_transformations = y_transformations
         self._dataset = torch.zeros(
             self.batch_size * self.num_batches, self.n * self.n, dtype=torch.bool
         )
@@ -504,33 +505,44 @@ class LightsOutDataset(Dataset):
                 first state of the sequence.
         """
         state = self._dataset[idx]
-        image = self.generator.get(self._dataset[idx])
+        input_image = self.generator.get(self._dataset[idx]).unsqueeze(0)
         if self.transforms is not None:
-            image = self.transforms(image.unsqueeze(0))
+            input_image = self.transforms(input_image)
 
-        sequence = torch.zeros(self.n * self.n, 1, image.size()[1], image.size()[2])
+        sequence = torch.zeros(self.n * self.n, input_image.size()[1], input_image.size()[2])
         for index, i in enumerate(self.generator.all_states(state)):
-            sequence[index] = self.generator.get(i).unsqueeze(0)
+            image = self.generator.get(i).unsqueeze(0)
+            if self.y_transformations is not None:
+                image = self.y_transformations(image)
+            sequence[index] = image.squeeze(0)
         indices = one_hot(torch.arange(self.n * self.n), num_classes=self.n * self.n + 1)
 
-        return image, sequence, indices
+        input_image /= 255.0
+        sequence /= 255.0
+
+        return input_image, sequence, indices
 
 
-class Puzzle8MnistDataModule(pl.LightningDataModule):
+class LightsOutDataModule(pl.LightningDataModule):
     def __init__(self, batch_size: int, input_size: int, num_workers: int):
         super().__init__()
         self.batch_size = batch_size
         self.input_size = input_size
         self.num_workers = num_workers
 
+        self.training = None
+        self.evaluation = None
+
     def setup(self, stage: str):
         transformations = torch.nn.Sequential(
+            transforms.Resize((self.input_size, self.input_size)),
             transforms.RandomResizedCrop((self.input_size, self.input_size), scale=(0.95, 1.0)),
             transforms.RandomRotation(15),
             transforms.GaussianBlur(3),
         )
-        self.training = LightsOutDataset(100, self.batch_size, self.input_size, transformations=transformations)
-        self.evaluation = LightsOutDataset(16, self.batch_size, self.input_size)
+        resize = transforms.Resize((self.input_size, self.input_size))
+        self.training = LightsOutDataset(5, 100, self.batch_size, transformations=transformations, y_transformations=resize)
+        self.evaluation = LightsOutDataset(5, 16, self.batch_size, transformations=resize, y_transformations=resize)
 
     def train_dataloader(self):
         return DataLoader(self.training, batch_size=self.batch_size, num_workers=self.num_workers)
