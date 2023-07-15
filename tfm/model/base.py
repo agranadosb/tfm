@@ -210,7 +210,7 @@ class Unet(nn.Module):
         layers = [input_channels] + layers
         movements_layers = [layers[-1] * 2] + movements_layers
         embedding_dim = layers[-1] * 2
-        decoder_layers = layers[: -len(layers): -1]
+        decoder_layers = layers[: -len(layers) : -1]
 
         self.encoder = UnetEncoder(layers, block)
         self.embedding = UnetEmbeddingBlock(

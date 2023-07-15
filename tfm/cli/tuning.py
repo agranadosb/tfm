@@ -11,7 +11,7 @@ from tfm.model.trainer import Trainer
 from tfm.utils.data import current_datetime
 
 
-def train_model(config: Dict[str, Any], project, epochs: int = 10):
+def _train_model(config: Dict[str, Any], project, epochs: int = 10):
     trainer = pl.Trainer(
         max_epochs=epochs,
         logger=WandbLogger(
@@ -32,6 +32,20 @@ def train_model(config: Dict[str, Any], project, epochs: int = 10):
 
 
 def hyperparameter_tuning(block: str, samples: int, epochs: int):
+    """
+    Create a hyperparameter tuning experiment using Ray Tune. The experiment
+    will use the block passed as parameter and will run the experiment
+    using the number of samples and epochs passed as parameters.
+
+    Parameters
+    ----------
+    block: str
+        The block to use in the experiment
+    samples: int
+        The number of samples to use in the experiment
+    epochs:
+        The number of epochs to use in the experiment
+    """
     configuration = {
         # Dataset configuration
         "input_size": 96,
@@ -70,7 +84,7 @@ def hyperparameter_tuning(block: str, samples: int, epochs: int):
 
     results = tune.run(
         tune.with_parameters(
-            train_model, epochs=epochs, project=f"hpt-{block}-{current_datetime()}"
+            _train_model, epochs=epochs, project=f"hpt-{block}-{current_datetime()}"
         ),
         config=configuration,
         search_alg=hyperopt_search,

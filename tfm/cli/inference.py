@@ -15,6 +15,8 @@ from tfm.utils.data import current_datetime
 
 
 def show_possibilities_lights():
+    """This class shows all the possible movements for a 3x3 lights out puzzle."""
+
     n = 3
     indices = [i for i in range(n * n)]
     generator = LightsOutDataset(3, 1, 1)
@@ -50,6 +52,8 @@ def show_possibilities_lights():
 
 
 def show_possibilities_puzzle():
+    """This class shows all the possible movements for an 8-puzzle."""
+
     indices = [0, 1, 3, 4]
     generator = Puzzle8MnistDataset(96, 1, 1)
     initial_image, images_moved, movements = generator[0]
@@ -85,8 +89,27 @@ def show_possibilities_puzzle():
 
 
 def generate_samples(
-    dataset_str: str, model_path: str, n: int, base_path: Optional[str] = None
+    dataset_str: str, model_name: str, n: int, base_path: Optional[str] = None
 ):
+    """
+    This function generates n samples from the dataset, then those samples are
+    passed through the model. Finally, the input and output images are saved in
+    the pwd folder. The model used has to be saved by bentoml and the model
+    name has to be `model_name` argument. You can provide a base path to save
+    the results in a different folder.
+
+
+    Parameters
+    ----------
+    dataset_str
+        Name of the dataset to use. It can be `lights-out` or `puzzle8`.
+    model_name
+        Name of the model to use. It has to be saved by bentoml.
+    n
+        Number of samples to generate.
+    base_path
+        Path to save the results. If None, the current working directory is used.
+    """
     dataset_class = Puzzle8MnistDataset
     dataset_params = {"num_batches": 1, "batch_size": n, "size": 96}
     if dataset_str == LIGHTS_DATASET:
@@ -97,7 +120,7 @@ def generate_samples(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     with torch.inference_mode():
-        model = bentoml.pytorch.load_model(model_path).to(device)
+        model = bentoml.pytorch.load_model(model_name).to(device)
         for images, _, _ in dataset:
             images = images.to(device)
             result = model(images)

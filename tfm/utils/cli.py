@@ -19,6 +19,7 @@ def get_cli() -> Dict[str, Callable]:
                 function[0].replace("_", "-"): function[1]
                 for function in inspect.getmembers(module[1], inspect.isfunction)
                 if id(inspect.getmodule(function[1])) in modules_ids
+                and not function[0].startswith("_")
             }
         )
 

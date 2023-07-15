@@ -437,7 +437,7 @@ class LightsOutDataset(Dataset):
         )
         for i in range(self.num_batches):
             self._dataset[
-                i * self.batch_size: (i + 1) * self.batch_size
+                i * self.batch_size : (i + 1) * self.batch_size
             ] = self.generator.random_sequence(self.batch_size)
 
     def __len__(self) -> int:
