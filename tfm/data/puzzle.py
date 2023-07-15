@@ -109,7 +109,10 @@ class Puzzle8MnistGenerator:
 
         # TODO: set the data path in a better way (as config param for example)
         self.dataset = torchvision.datasets.MNIST(
-            root="/opt/proyectos/tfm/data", train=True, download=False, transform=transforms.ToTensor()
+            root="/opt/proyectos/tfm/data",
+            train=True,
+            download=False,
+            transform=transforms.ToTensor(),
         )
         self.order = torch.IntTensor(order).to(torch.int8)
 
@@ -604,7 +607,9 @@ class Puzzle8MnistDataset(Dataset):
         Transformations to apply to the images.
     """
 
-    def __init__(self, size: int, num_batches: int, batch_size: int, transformations=None):
+    def __init__(
+        self, size: int, num_batches: int, batch_size: int, transformations=None
+    ):
         self._length = num_batches * batch_size
         self.transforms = transformations
         self.size = size
@@ -617,8 +622,8 @@ class Puzzle8MnistDataset(Dataset):
             current_index = i * batch_size
             orders, moves = self.data.random_sequence(batch_size, all_moves=True)
 
-            self.orders[current_index: current_index + batch_size] = orders
-            movements[current_index: current_index + batch_size] = moves
+            self.orders[current_index : current_index + batch_size] = orders
+            movements[current_index : current_index + batch_size] = moves
 
         self.movements = one_hot(movements, num_classes=5)
 
@@ -644,9 +649,11 @@ class Puzzle8MnistDataset(Dataset):
         images_moved = torch.zeros((4, 1, self.size, self.size))
         for index, move in enumerate(movements):
             if torch.all(move[-1] != 1):
-                images_moved[index] = self.resize(self.data.get(
-                    self.data.move(order, LABEL_TO_MOVEMENT["puzzle8"][index])
-                ).unsqueeze(0))
+                images_moved[index] = self.resize(
+                    self.data.get(
+                        self.data.move(order, LABEL_TO_MOVEMENT["puzzle8"][index])
+                    ).unsqueeze(0)
+                )
         return images_moved.squeeze()
 
     def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor, Tensor]:

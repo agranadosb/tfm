@@ -27,7 +27,7 @@ def show_possibilities_lights():
     fig.add_subplot(gs[0, :])
 
     plt.imshow(initial_image.squeeze())
-    plt.axis('off')
+    plt.axis("off")
     plt.title("Input Image", fontsize=40)
 
     for index, image, movement in zip(indices, images_moved, movements):
@@ -35,7 +35,7 @@ def show_possibilities_lights():
         col = index % n
         fig.add_subplot(gs[row, col])
         plt.imshow(image.squeeze())
-        plt.axis('off')
+        plt.axis("off")
         movement_str = LABEL_TO_STRING["lights-out"][index]
 
         movement_list_str = (
@@ -61,13 +61,13 @@ def show_possibilities_puzzle():
     fig.add_subplot(gs[0, :])
 
     plt.imshow(initial_image.squeeze())
-    plt.axis('off')
+    plt.axis("off")
     plt.title("Input Image", fontsize=40)
 
     for index, image, movement in zip(indices, images_moved, movements):
         fig.add_subplot(gs[1, index])
         plt.imshow(image.squeeze())
-        plt.axis('off')
+        plt.axis("off")
         movement_index = movement.argmax().item()
         movement_str = "Not Possible"
         if movement_index < 4:
@@ -84,7 +84,9 @@ def show_possibilities_puzzle():
     plt.show()
 
 
-def generate_samples(dataset_str: str, model_path: str, n: int, base_path: Optional[str] = None):
+def generate_samples(
+    dataset_str: str, model_path: str, n: int, base_path: Optional[str] = None
+):
     dataset_class = Puzzle8MnistDataset
     dataset_params = {"num_batches": 1, "batch_size": n, "size": 96}
     if dataset_str == LIGHTS_DATASET:
@@ -106,12 +108,16 @@ def generate_samples(dataset_str: str, model_path: str, n: int, base_path: Optio
     if not os.path.exists(base_path):
         os.mkdir(base_path)
 
-    results_folder = os.path.join(base_path, f"{dataset_str}-results-{current_datetime()}")
+    results_folder = os.path.join(
+        base_path, f"{dataset_str}-results-{current_datetime()}"
+    )
     if not os.path.exists(results_folder):
         os.mkdir(results_folder)
 
     with open(f"{results_folder}/{dataset_str}_samples.txt", "w") as f:
-        for index, (image, image_moved, movement) in enumerate(zip(images, result[0], result[1])):
+        for index, (image, image_moved, movement) in enumerate(
+            zip(images, result[0], result[1])
+        ):
             image = to_pil_image(image.cpu().detach())
             image_moved = to_pil_image(image_moved.cpu().detach())
             movement = movement.cpu().detach().argmax(dim=-1).squeeze().item()

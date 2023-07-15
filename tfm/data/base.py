@@ -9,7 +9,9 @@ from tfm.data.puzzle import Puzzle8MnistDataset
 
 
 class DataModule(pl.LightningDataModule):
-    def __init__(self, batch_size: int, input_size: int, num_workers: int, dataset: str):
+    def __init__(
+        self, batch_size: int, input_size: int, num_workers: int, dataset: str
+    ):
         super().__init__()
         self.batch_size = batch_size
         self.input_size = input_size
@@ -27,16 +29,24 @@ class DataModule(pl.LightningDataModule):
     def setup(self, stage: str):
         transformations = torch.nn.Sequential(
             transforms.Resize((self.input_size, self.input_size)),
-            transforms.RandomResizedCrop((self.input_size, self.input_size), scale=(0.95, 1.0)),
+            transforms.RandomResizedCrop(
+                (self.input_size, self.input_size), scale=(0.95, 1.0)
+            ),
             transforms.RandomRotation(15),
             transforms.GaussianBlur(3),
         )
 
-        self.training = self.dataset_class(self.dataset_size, 100, self.batch_size, transformations=transformations)
+        self.training = self.dataset_class(
+            self.dataset_size, 100, self.batch_size, transformations=transformations
+        )
         self.evaluation = self.dataset_class(self.dataset_size, 16, self.batch_size)
 
     def train_dataloader(self):
-        return DataLoader(self.training, batch_size=self.batch_size, num_workers=self.num_workers)
+        return DataLoader(
+            self.training, batch_size=self.batch_size, num_workers=self.num_workers
+        )
 
     def val_dataloader(self):
-        return DataLoader(self.evaluation, batch_size=self.batch_size, num_workers=self.num_workers)
+        return DataLoader(
+            self.evaluation, batch_size=self.batch_size, num_workers=self.num_workers
+        )

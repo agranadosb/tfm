@@ -23,8 +23,12 @@ MOVEMENT_TO_LABEL = {
     LIGHTS_DATASET: {i: i for i in range(25)},
 }
 LABEL_TO_MOVEMENT = {
-    PUZZLE_DATASET: {value: key for key, value in MOVEMENT_TO_LABEL[PUZZLE_DATASET].items()},
-    LIGHTS_DATASET: {value: key for key, value in MOVEMENT_TO_LABEL[LIGHTS_DATASET].items()},
+    PUZZLE_DATASET: {
+        value: key for key, value in MOVEMENT_TO_LABEL[PUZZLE_DATASET].items()
+    },
+    LIGHTS_DATASET: {
+        value: key for key, value in MOVEMENT_TO_LABEL[LIGHTS_DATASET].items()
+    },
 }
 
 BLOCKS = {"conv": ConvBlock, "residual": ResidualBlock}

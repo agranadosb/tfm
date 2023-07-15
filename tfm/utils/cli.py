@@ -14,11 +14,12 @@ def get_cli() -> Dict[str, Callable]:
     fire_mapping = {}
 
     for module in modules:
-        fire_mapping.update({
-            function[0].replace("_", "-"): function[1]
-            for function in inspect.getmembers(module[1], inspect.isfunction)
-            if id(inspect.getmodule(function[1])) in modules_ids}
+        fire_mapping.update(
+            {
+                function[0].replace("_", "-"): function[1]
+                for function in inspect.getmembers(module[1], inspect.isfunction)
+                if id(inspect.getmodule(function[1])) in modules_ids
+            }
         )
 
     return fire_mapping
-

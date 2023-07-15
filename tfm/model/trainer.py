@@ -155,7 +155,7 @@ class Trainer(pl.LightningModule):
             y_pred,
             y_selected,
             step,
-            batch_idx
+            batch_idx,
         )
 
         if step == "train":
@@ -173,13 +173,15 @@ class Trainer(pl.LightningModule):
         y_pred,
         y_selected,
         step,
-        batch_idx
+        batch_idx,
     ):
         if not self.has_logger:
             return
 
         confusion_matrix = metrics.confusion_matrix(
-            movements_predicted.cpu(), movements_selected.cpu(), labels=list(range(self.num_movement))
+            movements_predicted.cpu(),
+            movements_selected.cpu(),
+            labels=list(range(self.num_movement)),
         )
 
         self.confusion_matrix += confusion_matrix
@@ -193,7 +195,9 @@ class Trainer(pl.LightningModule):
                 x, movements_selected, movements_predicted, f"{step}-input"
             )
             self.plot_samples(y_pred, movements_selected, movements_predicted, step)
-            self.plot_samples(y_selected, movements_selected, movements_predicted, f"{step}-correct")
+            self.plot_samples(
+                y_selected, movements_selected, movements_predicted, f"{step}-correct"
+            )
 
     def training_step(self, batch, batch_idx):
         return self.forward(batch, batch_idx, "train")

@@ -77,7 +77,10 @@ def train(config: Union[Dict[str, Any], str], project: str, epochs: int):
     trainer.fit(
         model=Trainer(config),
         datamodule=DataModule(
-            config["batch_size"], config["input_size"], config["num_workers"], config["dataset"]
+            config["batch_size"],
+            config["input_size"],
+            config["num_workers"],
+            config["dataset"],
         ),
     )
 
@@ -93,6 +96,6 @@ def save_checkpoint(path: str, config: str, model_name: str):
     tag = bentoml.pytorch.save_model(
         model_name,
         trainer.model,
-        signatures={"__call__": {"batchable": True, "batch_dim": 0}}
+        signatures={"__call__": {"batchable": True, "batch_dim": 0}},
     )
     print(f"Saved model: {tag}")

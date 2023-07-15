@@ -23,7 +23,10 @@ def train_model(config: Dict[str, Any], project, epochs: int = 10):
     trainer.fit(
         model=Trainer(config),
         datamodule=DataModule(
-            config["batch_size"], config["input_size"], config["num_workers"], PUZZLE_DATASET
+            config["batch_size"],
+            config["input_size"],
+            config["num_workers"],
+            PUZZLE_DATASET,
         ),
     )
 
