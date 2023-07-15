@@ -5,8 +5,8 @@ from ray import tune
 import pytorch_lightning as pl
 from ray.tune.search.hyperopt import HyperOptSearch
 
-from tfm.constants import BLOCKS
-from tfm.data.puzzle import Puzzle8MnistDataModule
+from tfm.constants import BLOCKS, PUZZLE_DATASET
+from tfm.data.base import DataModule
 from tfm.model.trainer import Trainer
 from tfm.utils.data import current_datetime
 
@@ -22,8 +22,8 @@ def train_model(config: Dict[str, Any], project, epochs: int = 10):
 
     trainer.fit(
         model=Trainer(config),
-        datamodule=Puzzle8MnistDataModule(
-            config["batch_size"], config["input_size"], config["num_workers"]
+        datamodule=DataModule(
+            config["batch_size"], config["input_size"], config["num_workers"], PUZZLE_DATASET
         ),
     )
 

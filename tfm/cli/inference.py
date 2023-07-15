@@ -1,28 +1,61 @@
-from typing import Tuple
+import os
+from typing import Optional
 
+import bentoml
 import torch
 from matplotlib import pyplot as plt
 from matplotlib.gridspec import GridSpec
-from torchvision.transforms import transforms
+from torch.utils.data import DataLoader
+from torchvision.transforms.functional import to_pil_image
 
-from tfm.constants import LABEL_TO_MOVEMENT, LABEL_TO_STRING
-from tfm.data.puzzle import Puzzle8MnistDataset, Puzzle8MnistGenerator
-from tfm.plots.images import plot_image, plot_sample_result
-
-
-def random_prediction(model_path: str):
-    with torch.inference_mode():
-        model = torch.load(model_path)
-        image = Puzzle8MnistDataset(1, 1, 96)[0][0].unsqueeze(0).to(model.device)
-        plot_image(model.model(image)[0].squeeze().cpu().detach())
+from tfm.constants import LABEL_TO_STRING, LIGHTS_DATASET
+from tfm.data.lights import LightsOutDataset
+from tfm.data.puzzle import Puzzle8MnistDataset
+from tfm.utils.data import current_datetime
 
 
-def show_possibilities():
-    indices = [0, 1, 3, 4]
-    generator = Puzzle8MnistDataset(1, 1, 96)
+def show_possibilities_lights():
+    n = 3
+    indices = [i for i in range(n * n)]
+    generator = LightsOutDataset(3, 1, 1)
     initial_image, images_moved, movements = generator[0]
 
     fig = plt.figure(constrained_layout=True)
+    plt.gray()
+    gs = GridSpec(4, 3, figure=fig)
+
+    fig.add_subplot(gs[0, :])
+
+    plt.imshow(initial_image.squeeze())
+    plt.axis('off')
+    plt.title("Input Image", fontsize=40)
+
+    for index, image, movement in zip(indices, images_moved, movements):
+        row = index // n + 1
+        col = index % n
+        fig.add_subplot(gs[row, col])
+        plt.imshow(image.squeeze())
+        plt.axis('off')
+        movement_str = LABEL_TO_STRING["lights-out"][index]
+
+        movement_list_str = (
+            str(movement.numpy().tolist())
+            .replace("[", "")
+            .replace("]", "")
+            .replace(",", " ")
+        )
+        plt.title(f"{movement_list_str} - {movement_str}", fontsize=20)
+
+    plt.show()
+
+
+def show_possibilities_puzzle():
+    indices = [0, 1, 3, 4]
+    generator = Puzzle8MnistDataset(96, 1, 1)
+    initial_image, images_moved, movements = generator[0]
+
+    fig = plt.figure(constrained_layout=True)
+    plt.gray()
     gs = GridSpec(2, 5, figure=fig)
 
     fig.add_subplot(gs[0, :])
@@ -51,22 +84,39 @@ def show_possibilities():
     plt.show()
 
 
-def move(order: Tuple[int], model_path: str):
-    order = torch.tensor(list(order))
-    image = transforms.Resize((96, 96))(
-        Puzzle8MnistGenerator().get(order).unsqueeze(0)
-    ).unsqueeze(0)
+def generate_samples(dataset_str: str, model_path: str, n: int, base_path: Optional[str] = None):
+    dataset_class = Puzzle8MnistDataset
+    dataset_params = {"num_batches": 1, "batch_size": n, "size": 96}
+    if dataset_str == LIGHTS_DATASET:
+        dataset_class = LightsOutDataset
+        dataset_params["size"] = 5
+
+    dataset = DataLoader(dataset_class(**dataset_params), batch_size=n)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     with torch.inference_mode():
-        model = torch.load(model_path)
-        image = image.to(model.device)
-        result = model.model(image)
+        model = bentoml.pytorch.load_model(model_path).to(device)
+        for images, _, _ in dataset:
+            images = images.to(device)
+            result = model(images)
 
-        image = image.squeeze().cpu().detach().squeeze()
-        result_image = result[0].cpu().detach().squeeze()
-        threshold = 0.42
-        result_image[result_image < threshold] = 0
-        result_movement = LABEL_TO_MOVEMENT["puzzle8"][
-            result[1].cpu().detach().argmax(dim=-1).squeeze().item()
-        ]
+    if base_path is None:
+        base_path = os.getcwd()
 
-        plot_sample_result(image, result_image, result_movement)
+    if not os.path.exists(base_path):
+        os.mkdir(base_path)
+
+    results_folder = os.path.join(base_path, f"{dataset_str}-results-{current_datetime()}")
+    if not os.path.exists(results_folder):
+        os.mkdir(results_folder)
+
+    with open(f"{results_folder}/{dataset_str}_samples.txt", "w") as f:
+        for index, (image, image_moved, movement) in enumerate(zip(images, result[0], result[1])):
+            image = to_pil_image(image.cpu().detach())
+            image_moved = to_pil_image(image_moved.cpu().detach())
+            movement = movement.cpu().detach().argmax(dim=-1).squeeze().item()
+            movement_str = LABEL_TO_STRING[dataset_str][movement]
+
+            f.write(f"{index}-{movement_str}\n")
+            image.save(f"{results_folder}/{index}_input.png")
+            image_moved.save(f"{results_folder}/{index}_output.png")

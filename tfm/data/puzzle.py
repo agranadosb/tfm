@@ -6,9 +6,8 @@ import torch
 import torchvision
 from torch import Tensor
 from torch.nn.functional import one_hot
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 from torchvision import transforms
-import pytorch_lightning as pl
 
 from tfm.constants import ORDERED_ORDER, MOVEMENTS, MOVEMENT_TO_LABEL, LABEL_TO_MOVEMENT
 from tfm.utils.puzzle import has_correct_order
@@ -595,14 +594,18 @@ class Puzzle8MnistDataset(Dataset):
 
     Parameters
     ----------
-    batches: int
+    size: int
+        Size of the images.
+    num_batches: int
         Number of batches.
     batch_size: int
         Size of each batch.
+    transformations: Optional[Callable]
+        Transformations to apply to the images.
     """
 
-    def __init__(self, batches: int, batch_size: int, size: int, transformations=None):
-        self._length = batches * batch_size
+    def __init__(self, size: int, num_batches: int, batch_size: int, transformations=None):
+        self._length = num_batches * batch_size
         self.transforms = transformations
         self.size = size
         self.resize = transforms.Resize((size, size))
@@ -610,7 +613,7 @@ class Puzzle8MnistDataset(Dataset):
 
         self.orders = torch.zeros((self._length, 9), dtype=torch.int8)
         movements = torch.zeros((self._length, 4), dtype=torch.int64)
-        for i in range(batches):
+        for i in range(num_batches):
             current_index = i * batch_size
             orders, moves = self.data.random_sequence(batch_size, all_moves=True)
 
@@ -657,27 +660,3 @@ class Puzzle8MnistDataset(Dataset):
             image = self.transforms(image)
 
         return image, images_moved, movement
-
-
-class Puzzle8MnistDataModule(pl.LightningDataModule):
-    def __init__(self, batch_size: int, input_size: int, num_workers: int):
-        super().__init__()
-        self.batch_size = batch_size
-        self.input_size = input_size
-        self.num_workers = num_workers
-
-    def setup(self, stage: str):
-        transformations = torch.nn.Sequential(
-            transforms.RandomResizedCrop((self.input_size, self.input_size), scale=(0.95, 1.0)),
-            transforms.RandomRotation(15),
-            transforms.GaussianBlur(3),
-        )
-        self.training = Puzzle8MnistDataset(100, self.batch_size, self.input_size, transformations=transformations)
-        self.evaluation = Puzzle8MnistDataset(16, self.batch_size, self.input_size)
-
-    def train_dataloader(self):
-        return DataLoader(self.training, batch_size=self.batch_size, num_workers=self.num_workers)
-
-    def val_dataloader(self):
-        return DataLoader(self.evaluation, batch_size=self.batch_size, num_workers=self.num_workers)
-

@@ -105,9 +105,11 @@ class Trainer(pl.LightningModule):
         )
         if self.is_hyp:
             return optimizer
+
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, patience=7, verbose=True
         )
+
         return [optimizer], {
             "scheduler": scheduler,
             "monitor": "ptl/val_loss",
@@ -141,10 +143,41 @@ class Trainer(pl.LightningModule):
 
         loss = images_loss + movements_loss
 
-        if not self.has_logger:
-            return loss
-
         accuracy = self.accuracy(movements_predicted, movements_selected)
+
+        self.log_step(
+            movements_predicted,
+            movements_selected,
+            accuracy,
+            images_loss,
+            movements_loss,
+            x,
+            y_pred,
+            y_selected,
+            step,
+            batch_idx
+        )
+
+        if step == "train":
+            return loss
+        return loss, accuracy
+
+    def log_step(
+        self,
+        movements_predicted,
+        movements_selected,
+        accuracy,
+        images_loss,
+        movements_loss,
+        x,
+        y_pred,
+        y_selected,
+        step,
+        batch_idx
+    ):
+        if not self.has_logger:
+            return
+
         confusion_matrix = metrics.confusion_matrix(
             movements_predicted.cpu(), movements_selected.cpu(), labels=list(range(self.num_movement))
         )
@@ -162,10 +195,6 @@ class Trainer(pl.LightningModule):
             self.plot_samples(y_pred, movements_selected, movements_predicted, step)
             self.plot_samples(y_selected, movements_selected, movements_predicted, f"{step}-correct")
 
-        if step == "train":
-            return loss
-        return loss, accuracy
-
     def training_step(self, batch, batch_idx):
         return self.forward(batch, batch_idx, "train")
 
@@ -173,9 +202,6 @@ class Trainer(pl.LightningModule):
         return self.forward(batch, batch_idx, "val")
 
     def on_validation_batch_end(self, out, *_):
-        if not self.has_logger:
-            return
-
         loss, accuracy = out
         self.val_loss.append(loss)
         self.val_acc.append(accuracy)
@@ -189,18 +215,15 @@ class Trainer(pl.LightningModule):
         self.confusion_matrix = np.zeros((self.num_movement, self.num_movement))
 
     def on_validation_epoch_end(self) -> None:
-        if not self.has_logger:
-            return
-
-        if self.global_step != 0:
-            self.plot_confusion_matrix("val", True)
-        self.confusion_matrix = np.zeros((self.num_movement, self.num_movement))
+        if self.has_logger:
+            if self.global_step != 0:
+                self.plot_confusion_matrix("val", True)
+            self.confusion_matrix = np.zeros((self.num_movement, self.num_movement))
 
         # TODO: Refactor this way of calculating the average
         avg_loss = torch.tensor(self.val_loss).mean()
-        avg_acc = torch.tensor(self.val_acc).mean()
         self.log("ptl/val_loss", avg_loss)
-        self.log("ptl/val_accuracy", avg_acc)
+        self.log("ptl/val_accuracy", torch.tensor(self.val_acc).mean())
 
         if self.is_hyp:
             tune.report(val_loss=avg_loss.item())
