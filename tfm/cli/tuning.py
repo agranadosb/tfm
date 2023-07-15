@@ -1,8 +1,8 @@
 from typing import Dict, Any
 
+import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger  # noqa
 from ray import tune
-import pytorch_lightning as pl
 from ray.tune.search.hyperopt import HyperOptSearch
 
 from tfm.constants import BLOCKS, PUZZLE_DATASET

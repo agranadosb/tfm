@@ -2,10 +2,10 @@ import os
 from typing import Dict, Any, Union
 
 import bentoml
+import pytorch_lightning as pl
 import yaml
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger  # noqa
-import pytorch_lightning as pl
 
 from tfm.constants import BLOCKS
 from tfm.data.base import DataModule

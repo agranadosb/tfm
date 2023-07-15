@@ -1,17 +1,16 @@
 import io
 from typing import Any, Dict
 
-import pytorch_lightning as pl
+import PIL
 import numpy as np
 import pandas as pd
+import pytorch_lightning as pl
 import seaborn
-
-import PIL
+import torch
 import wandb
 from matplotlib import pyplot as plt
 from ray import tune
 from sklearn import metrics
-import torch
 from torch import nn, optim
 from torchmetrics import Accuracy
 from torchvision.transforms.functional import to_pil_image
