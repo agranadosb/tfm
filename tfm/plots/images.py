@@ -19,6 +19,7 @@ def plot_image(image: torch.Tensor):
     elif image.ndim == 3:
         image = image.permute(1, 2, 0)
 
+    plt.axis("off")
     plt.imshow(image)
     plt.show()
 

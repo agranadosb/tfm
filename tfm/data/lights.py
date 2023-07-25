@@ -3,9 +3,7 @@ from typing import List, Tuple
 import numpy as np
 import torch
 from torch.nn.functional import one_hot
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-import pytorch_lightning as pl
+from torch.utils.data import Dataset
 
 
 class LightsOutGenerator:
@@ -90,14 +88,16 @@ class LightsOutGenerator:
         The length of the line between lights. Default is 4.
     """
 
-    def __init__(self, n: int, size: int = 32, line_value: int = 128, line_length: int = 4):
+    def __init__(
+        self, n: int, size: int = 32, line_value: int = 128, line_length: int = 4
+    ):
         self.n = n
         self.size = size - line_length * 2
         self.line_value = line_value
         self.line_length = line_length
 
     def _compute_border_coordinate(
-            self, x: int, y: int, border_type: str
+        self, x: int, y: int, border_type: str
     ) -> Tuple[int, int]:
         """
         Given a coordinate, computes the coordinate of the border of a light.
@@ -127,7 +127,7 @@ class LightsOutGenerator:
         return y, x
 
     def _compute_border(
-            self, border_type: str, base: int, init: int, fin: int, value: int = 1
+        self, border_type: str, base: int, init: int, fin: int, value: int = 1
     ) -> List[Tuple[int, int]]:
         """
         Computes the coordinates of the border of a light.
@@ -181,9 +181,7 @@ class LightsOutGenerator:
         result = []
         for i in range(self.line_length):
             result += [
-                self._compute_border_coordinate(
-                    base + i * value, index, border_type
-                )
+                self._compute_border_coordinate(base + i * value, index, border_type)
                 for index in range(init, fin)
             ]
         return result
@@ -217,10 +215,7 @@ class LightsOutGenerator:
             The image of the state.
         """
         square_size = self.size + self.line_length * 2
-        image = torch.zeros(
-            self.n * square_size,
-            self.n * square_size
-        )
+        image = torch.zeros(self.n * square_size, self.n * square_size)
         for i in range(self.n):
             for j in range(self.n):
                 # Get index on the vector state
@@ -237,10 +232,10 @@ class LightsOutGenerator:
 
                 # Create border
                 total_coordinates = (
-                    self._compute_border("y", top_y, top_x, bottom_x) +
-                    self._compute_border("y", bottom_y - 1, top_x, bottom_x, -1) +
-                    self._compute_border("x", top_x, top_y, bottom_y) +
-                    self._compute_border("x", bottom_x - 1, top_y, bottom_y, -1)
+                    self._compute_border("y", top_y, top_x, bottom_x)
+                    + self._compute_border("y", bottom_y - 1, top_x, bottom_x, -1)
+                    + self._compute_border("x", top_x, top_y, bottom_y)
+                    + self._compute_border("x", bottom_x - 1, top_y, bottom_y, -1)
                 )
 
                 x_coordinates, y_coordinates = zip(*total_coordinates)
@@ -286,9 +281,9 @@ class LightsOutGenerator:
             action = np.random.choice(indices)
             current_state = self._apply_action(current_state, action)
 
-        return result.reshape(
-            total_length, self.n * self.n
-        )[torch.randperm(self.n * self.n)][:length]
+        return result.reshape(total_length, self.n * self.n)[
+            torch.randperm(total_length)
+        ][:length]
 
     def _apply_action(self, state: torch.Tensor, action: int) -> torch.Tensor:
         """
@@ -343,9 +338,9 @@ class LightsOutGenerator:
         if bottom_y > self.n * self.n:
             bottom_y = self.n * self.n
 
-        new_state[
+        new_state[top_x:bottom_x, top_y:bottom_y] = ~state[
             top_x:bottom_x, top_y:bottom_y
-        ] = ~state[top_x:bottom_x, top_y:bottom_y]
+        ]
 
         return new_state
 
@@ -420,17 +415,20 @@ class LightsOutDataset(Dataset):
 
     Parameters
     ----------
-    n: int
+    size: int
         The size of the grid.
     batch_size: int
         The size of the batch.
     num_batches: int
         The number of batches.
     """
-    def __init__(self, n: int, batch_size: int, num_batches: int, transformations=None):
+
+    def __init__(
+        self, size: int, num_batches: int, batch_size: int, transformations=None
+    ):
         super().__init__()
-        self.n = n
-        self.generator = LightsOutGenerator(n)
+        self.n = size
+        self.generator = LightsOutGenerator(size)
         self.batch_size = batch_size
         self.num_batches = num_batches
         self.transforms = transformations
@@ -438,9 +436,9 @@ class LightsOutDataset(Dataset):
             self.batch_size * self.num_batches, self.n * self.n, dtype=torch.bool
         )
         for i in range(self.num_batches):
-            self._dataset[i * self.batch_size:(i + 1) * self.batch_size] = self.generator.random_sequence(
-                self.batch_size
-            )
+            self._dataset[
+                i * self.batch_size : (i + 1) * self.batch_size
+            ] = self.generator.random_sequence(self.batch_size)
 
     def __len__(self) -> int:
         return self.batch_size * self.num_batches
@@ -504,36 +502,20 @@ class LightsOutDataset(Dataset):
                 first state of the sequence.
         """
         state = self._dataset[idx]
-        image = self.generator.get(self._dataset[idx])
+        input_image = self.generator.get(self._dataset[idx]).unsqueeze(0)
         if self.transforms is not None:
-            image = self.transforms(image.unsqueeze(0))
+            input_image = self.transforms(input_image)
 
-        sequence = torch.zeros(self.n * self.n, 1, image.size()[1], image.size()[2])
-        for index, i in enumerate(self.generator.all_states(state)):
-            sequence[index] = self.generator.get(i).unsqueeze(0)
-        indices = one_hot(torch.arange(self.n * self.n), num_classes=self.n * self.n + 1)
-
-        return image, sequence, indices
-
-
-class Puzzle8MnistDataModule(pl.LightningDataModule):
-    def __init__(self, batch_size: int, input_size: int, num_workers: int):
-        super().__init__()
-        self.batch_size = batch_size
-        self.input_size = input_size
-        self.num_workers = num_workers
-
-    def setup(self, stage: str):
-        transformations = torch.nn.Sequential(
-            transforms.RandomResizedCrop((self.input_size, self.input_size), scale=(0.95, 1.0)),
-            transforms.RandomRotation(15),
-            transforms.GaussianBlur(3),
+        sequence = torch.zeros(
+            self.n * self.n, input_image.size()[1], input_image.size()[2]
         )
-        self.training = LightsOutDataset(100, self.batch_size, self.input_size, transformations=transformations)
-        self.evaluation = LightsOutDataset(16, self.batch_size, self.input_size)
+        for index, i in enumerate(self.generator.all_states(state)):
+            sequence[index] = self.generator.get(i).unsqueeze(0).squeeze(0)
+        indices = one_hot(
+            torch.arange(self.n * self.n), num_classes=self.n * self.n + 1
+        )
 
-    def train_dataloader(self):
-        return DataLoader(self.training, batch_size=self.batch_size, num_workers=self.num_workers)
+        input_image /= 255.0
+        sequence /= 255.0
 
-    def val_dataloader(self):
-        return DataLoader(self.evaluation, batch_size=self.batch_size, num_workers=self.num_workers)
+        return input_image, sequence, indices

@@ -25,7 +25,7 @@ class Puzzle8MnistService:
         result = self.model.run(image)
 
         result_image = result[0].squeeze(0).detach().to("cpu")
-        movement = LABEL_TO_STRING[
+        movement = LABEL_TO_STRING["puzzle8"][
             result[1].squeeze().argmax().detach().to("cpu").item()
         ]
 
@@ -35,6 +35,4 @@ class Puzzle8MnistService:
         grid_images[0] = image.squeeze(0)
         grid_images[1] = result_image
 
-        return self.to_image(
-            make_grid(grid_images, nrow=2, padding=5, pad_value=1)
-        )
+        return self.to_image(make_grid(grid_images, nrow=2, padding=5, pad_value=1))

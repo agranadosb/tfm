@@ -11,9 +11,6 @@ class InputSchema(BaseModel):
     order: Tuple[int, int, int, int, int, int, int, int, int]
 
 
-@svc.api(
-    input=JSON(pydantic_model=InputSchema),
-    output=Image()
-)
+@svc.api(input=JSON(pydantic_model=InputSchema), output=Image())
 def puzzle(order):
     return puzzle_service.predict(torch.tensor(order.order))

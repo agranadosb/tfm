@@ -1,34 +1,52 @@
 from typing import Dict, Any
 
+import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger  # noqa
 from ray import tune
-import pytorch_lightning as pl
 from ray.tune.search.hyperopt import HyperOptSearch
 
-from tfm.constants import BLOCKS
-from tfm.data.puzzle import Puzzle8MnistDataModule
+from tfm.constants import BLOCKS, PUZZLE_DATASET
+from tfm.data.base import DataModule
 from tfm.model.trainer import Trainer
 from tfm.utils.data import current_datetime
 
 
-def train_model(config: Dict[str, Any], project, epochs: int = 10):
-    trainer = pl.Trainer(
-        max_epochs=epochs,
-        logger=WandbLogger(
-            project=project,
-            name=f"trial-{current_datetime()}",
-        ),
-    )
+def _train_model(config: Dict[str, Any], project, epochs: int = 10):
+    logger = None
+    try:
+        logger = WandbLogger(project=project, name=f"trial-{current_datetime()}")
+    except ModuleNotFoundError:
+        print("Wandb not found. Logging won't be done.")
+        config["log"] = False
+
+    trainer = pl.Trainer(max_epochs=epochs, logger=logger)
 
     trainer.fit(
         model=Trainer(config),
-        datamodule=Puzzle8MnistDataModule(
-            config["batch_size"], config["input_size"], config["num_workers"]
+        datamodule=DataModule(
+            config["batch_size"],
+            config["input_size"],
+            config["num_workers"],
+            PUZZLE_DATASET,
         ),
     )
 
 
 def hyperparameter_tuning(block: str, samples: int, epochs: int):
+    """
+    Create a hyperparameter tuning experiment using Ray Tune. The experiment
+    will use the block passed as parameter and will run the experiment
+    using the number of samples and epochs passed as parameters.
+
+    Parameters
+    ----------
+    block: str
+        The block to use in the experiment
+    samples: int
+        The number of samples to use in the experiment
+    epochs:
+        The number of epochs to use in the experiment
+    """
     configuration = {
         # Dataset configuration
         "input_size": 96,
@@ -40,6 +58,7 @@ def hyperparameter_tuning(block: str, samples: int, epochs: int):
         "movements": 4,
         "block": BLOCKS[block],
         "hyp": True,
+        "dataset": PUZZLE_DATASET
     }
     search_space = {
         # Training configuration
@@ -67,7 +86,7 @@ def hyperparameter_tuning(block: str, samples: int, epochs: int):
 
     results = tune.run(
         tune.with_parameters(
-            train_model, epochs=epochs, project=f"hpt-{block}-{current_datetime()}"
+            _train_model, epochs=epochs, project=f"hpt-{block}-{current_datetime()}"
         ),
         config=configuration,
         search_alg=hyperopt_search,
