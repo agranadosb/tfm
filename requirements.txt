@@ -130,7 +130,6 @@ pyasn1-modules==0.2.8
 pydantic==1.10.8
 Pygments==2.15.1
 PyJWT==2.7.0
-pynvml==11.5.0
 pyparsing==3.0.9
 pyproject_hooks==1.0.0
 pyrsistent==0.19.3
@@ -176,11 +175,8 @@ tensorboardX==2.6
 termcolor==2.3.0
 threadpoolctl==3.1.0
 tomli==2.0.1
-torch==1.13.1+cu116
-torchaudio==0.13.1+cu116
 torchmetrics==0.11.3
 torchview==0.2.6
-torchvision==0.14.1+cu116
 tornado==6.3.2
 tqdm==4.65.0
 traitlets==5.9.0

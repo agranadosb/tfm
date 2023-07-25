@@ -56,7 +56,11 @@ def train(config: Union[Dict[str, Any], str], project: str, epochs: int):
     logger = None
     run_name = f"full-training-{current_datetime()}"
     if config.get("log", True):
-        logger = WandbLogger(project=project, name=run_name)
+        try:
+            logger = WandbLogger(project=project, name=run_name)
+        except ModuleNotFoundError:
+            print("Wandb not found. Logging won't be done.")
+            config["log"] = False
 
     callbacks = [
         ModelCheckpoint(

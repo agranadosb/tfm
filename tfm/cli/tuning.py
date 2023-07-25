@@ -12,13 +12,14 @@ from tfm.utils.data import current_datetime
 
 
 def _train_model(config: Dict[str, Any], project, epochs: int = 10):
-    trainer = pl.Trainer(
-        max_epochs=epochs,
-        logger=WandbLogger(
-            project=project,
-            name=f"trial-{current_datetime()}",
-        ),
-    )
+    logger = None
+    try:
+        logger = WandbLogger(project=project, name=f"trial-{current_datetime()}")
+    except ModuleNotFoundError:
+        print("Wandb not found. Logging won't be done.")
+        config["log"] = False
+
+    trainer = pl.Trainer(max_epochs=epochs, logger=logger)
 
     trainer.fit(
         model=Trainer(config),
@@ -57,6 +58,7 @@ def hyperparameter_tuning(block: str, samples: int, epochs: int):
         "movements": 4,
         "block": BLOCKS[block],
         "hyp": True,
+        "dataset": PUZZLE_DATASET
     }
     search_space = {
         # Training configuration
