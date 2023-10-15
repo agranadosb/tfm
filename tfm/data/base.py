@@ -81,10 +81,48 @@ class BaseGenerator(ABC):
 
     @abstractmethod
     def init_state(self) -> State:
+        """
+        Returns the initial state used to generate a "Sequence". This method
+        is called when the method "generate" is called. Each "Sequence" starts
+        with the initial state.
+
+        Examples
+        --------
+        >>> generator = ClassInheritingBaseGenerator(sequences=1, sequence_length=2)
+        >>> generator.init_state()
+        'state'
+
+        Returns
+        -------
+        State
+            The initial state.
+        """
         ...
 
     @abstractmethod
     def select(self, sample: Sample) -> State:
+        """
+        Given a "Sample", it selects a "State" from the sequence of "States" of
+        the "Sample".
+
+        Parameters
+        ----------
+        sample : Sample
+
+        Examples
+        --------
+        >>> generator = ClassInheritingBaseGenerator(sequences=1, sequence_length=2)
+        >>> generator.select(('state', ('new-state-1', 'new-state-2', 'new-state-3')))
+        'new-state-1'
+
+        >>> generator.select(('state', ('new-state-1', None, None)))
+        'new-state-1'
+
+        Returns
+        -------
+        State
+            The selected "State".
+        """
         ...
 
     @abstractmethod
