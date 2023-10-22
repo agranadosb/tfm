@@ -1,125 +1,138 @@
-import random
-from typing import List, Tuple, Sequence
-
 import numpy as np
 import torch
 import torchvision
 from torch import Tensor
-from torch.nn.functional import one_hot
-from torch.utils.data import Dataset
 from torchvision import transforms
 
-from tfm.constants import ORDERED_ORDER, MOVEMENTS, MOVEMENT_TO_LABEL, LABEL_TO_MOVEMENT
+from tfm.constants.app import ROOT
+from tfm.constants.puzzle import DEFAULT_ORDER, ACTION_TO_MOVEMENT
+from tfm.constants.types import PuzzleSample
+from tfm.data.base import BaseGenerator
 from tfm.utils.puzzle import has_correct_order
 
 
-class Puzzle8MnistGenerator:
-    """This class is used to manage the generation of 8-puzzle data. The class uses
-    "orders" to manage the position of the digits in the grid and to apply
-    movements to the grid.
+class Puzzle8MnistGenerator(BaseGenerator):
+    """This class is used to manage the generation of 8-puzzle data. The 8-puzzle
+    problem is based on ordering a grid of 3x3 with 8 digits and a blank space.
+    The digits are from 1 to 8 and the blank space is represented by 0. The
+    blank space can be moved to the right, left, top or bottom. The goal is to
+    order the grid only with the movements of the blank space. The order that
+    we want to achieve is:
 
-    For example, the next order:
+    >>> # 1 2 3
+    >>> # 8 0 4
+    >>> # 7 6 5
 
-    ```
-    [ 1, 2, 3, 8, 0, 4, 7, 6, 5]
-    ```
+    The grid is represented as a list of 9 digits. The tensor representation of
+    this list will be the state of the problem. For example, the previous
+    grid is represented as:
 
-    Represents the next grid:
+    >>> torch.tensor([1, 2, 3, 8, 0, 4, 7, 6, 5], dtype=torch.int8)
 
-    ```
-    1 2 3
-    8 0 4
-    7 6 5
-    ```
+    A movement is represented as an index shift. For example, if we want to move
+    the blank space to the right, we need to shift the index of the blank space
+    to the right. In the previous example, the index of the blank space is 4.
+    If we move the blank space to the right, the new index of the blank space
+    is 5. The movement is represented as the shift applied to the index where
+    the blank space is located. In this case, the movement is 1:
 
-    If we want to apply a random movement to the grid, we can use the method
-    `random_move`:
+    >>> [ 1, 2, 3, 8, 0, 4, 7, 6, 5] -> [ 1, 2, 3, 8, 4, 0, 7, 6, 5]
 
-    ```
-    order = [ 1, 2, 3, 8, 0, 4, 7, 6, 5]
-    zero_index = 4
-    generator = Puzzle8MnistGenerator(order)
+    As it can be seen, the blank space has been moved to the right and the
+    digit 4 has been moved to the left (where the blank space was located).
 
-    new_order, new_zero_index, movement = generator.random_move(order, zero_index)
-    ```
+    The total movements that can be applied to the blank space are 4: Top,
+    Bottom, Left and Right. The movements are represented as indices shift:
 
-    A possible result of this code is:
+    - Right movement   :  1
+    - Left movement    : -1
+    - Bottom movement  : -3
+    - Top movement     :  3
 
-    ```
-    new_order = [ 1, 2, 3, 8, 4, 0, 7, 6, 5]
-    new_zero_index = 5
-    movement = 1
-    ```
+    Each movement is also an action. The actions are represented as indices:
 
-    And the new grid is:
+     - Right movement   :  0
+     - Left movement    : -1
+     - Bottom movement  : -2
+     - Top movement     :  3
 
-    ```
-    1 2 3
-    8 4 0
-    7 6 5
-    ```
+    So there is a direct mapping between the actions and the movements:
 
-    So the movement is `1` because the zero digit has moved to the right.
+    >>> ACTION_TO_MOVEMENT = {0: 1, 1: -1, 2: 3, 3: -3}
 
-    When we want to transform an order to an image in a tensor format, we can use
-    the method `get`:
+    Each Sample of this problem is a tuple of two elements. The first element
+    is the state of the grid and the second element is a tuple of 4 elements.
+    Each element of the tuple is a possible state of the grid after applying
+    the movement. If the movement is not possible, the element is None.
 
-    ```
-    order = [ 1, 2, 3, 8, 0, 4, 7, 6, 5]
-    generator = Puzzle8MnistGenerator(order)
+    This class implements the BaseGenerator interface, so it can be used to
+    generate data for the 8-puzzle problem. To know more about how to use the
+    BaseGenerator interface, check the documentation of the BaseGenerator
+    class.
 
-    image = generator.get(order)
-    ```
-
-    The image will be a tensor of size `(28, 28)` which represents the grid:
-
-    ```
-    1 2 3
-    8 0 4
-    7 6 5
-    ```
-
-    This class more functions to manage random sequences, getting all possible
-    movements from a grid, etc.
-
-    The movements can be represented as indices or movement applied to an
-    index:
-
-     - Right movement   :  1 or 0
-     - Left movement    : -1 or 1
-     - Bottom movement  : -3 or 2
-     - Top movement     :  3 or 3
+    Examples
+    --------
+    >>> generator = Puzzle8MnistGenerator(1, 2)
+    >>> generator.sequence()
+    [
+        (
+            torch.tensor([1, 2, 3, 8, 0, 4, 7, 6, 5], dtype=torch.int8),
+            (
+                torch.tensor([1, 2, 3, 8, 4, 0, 7, 6, 5], dtype=torch.int8),
+                torch.tensor([1, 2, 3, 0, 8, 4, 7, 6, 5], dtype=torch.int8),
+                torch.tensor([1, 2, 3, 8, 6, 4, 7, 0, 5], dtype=torch.int8)
+                torch.tensor([1, 0, 3, 8, 2, 4, 7, 6, 5], dtype=torch.int8),
+            ),
+        ),
+        (
+            torch.tensor([1, 2, 3, 8, 6, 4, 7, 0, 5], dtype=torch.int8),
+            (
+                torch.tensor([1, 2, 3, 8, 6, 4, 7, 5, 0], dtype=torch.int8),
+                torch.tensor([1, 2, 3, 8, 6, 4, 0, 7, 5], dtype=torch.int8),
+                None,
+                torch.tensor([1, 2, 3, 8, 0, 4, 7, 6, 5], dtype=torch.int8),
+            ),
+        )
+    ]
 
     Parameters
     ----------
-    order: List[int] = [1, 2, 3, 8, 0, 4, 7, 6, 5]
-        Default order on the grid. The default order is:
-        ```
-        1 2 3
-        8 0 4
-        7 6 5
-        ```
+    sequences : int
+        Number of sequences to generate.
+    sequence_length : int
+        Length of the sequences to generate.
+    order: list[int] = [1, 2, 3, 8, 0, 4, 7, 6, 5]
+        Default order on the grid and initial state of the grid.
+    shuffle : bool, optional
+        If True, the sequences are shuffled, by default True.
     """
 
-    def __init__(self, order: List[int] = None):
+    def __init__(
+        self,
+        sequences: int,
+        sequence_length: int,
+        /, *,
+        order: list[int] = None,
+        shuffle: bool = True,
+    ):
+        super().__init__(
+            sequences, sequence_length, actions=4, shuffle=shuffle
+        )
         if order is None:
-            order = ORDERED_ORDER
+            order = DEFAULT_ORDER
 
-        self.size = 28 * 3
-
-        # TODO: set the data path in a better way (as config param for example)
         self.dataset = torchvision.datasets.MNIST(
-            root="/opt/proyectos/tfm/data",
+            root=ROOT,
             train=True,
-            download=False,
+            download=True,
             transform=transforms.ToTensor(),
         )
-        self.order = torch.IntTensor(order).to(torch.int8)
 
         if not has_correct_order(order):
             raise ValueError(
                 "The list must have only the next values [0, 1, 2, 3, 4, 5, 6, 7, 8]"
             )
+        self.order = torch.as_tensor(order, dtype=torch.int8)
 
         self.digits_indices = {
             index: np.zeros(10, dtype=np.int16) for index in range(10)
@@ -138,108 +151,55 @@ class Puzzle8MnistGenerator:
             if completed.all():
                 break
 
-    def _is_beyond_bounds(self, index: int, movement: int) -> bool:  # noqa
+    def init_state(self) -> Tensor:
         """
-        Check if the index is beyond the bounds of the grid.
+        Get the initial state of the grid. The initial state is the order of the
+        grid.
 
-        An example of a movement applied to an index that is beyond the bounds
-        of the grid is when the index is 0 and the movement is -1.
-
-        An example that is into the bounds is when the index is 8 and the
-        movement is 1
-
-        ```
-        generator = Puzzle8MnistGenerator()
-
-        result = generator._is_beyond_bounds(0, -1)
-        print(result) # True
-
-        result = generator._is_beyond_bounds(8, 1)
-        print(result) # False
-        ```
-
-        Parameters
-        ----------
-        index: int
-            Index to check.
-        movement: int
-            Movement to check as index shift.
+        Examples
+        --------
+        >>> generator = Puzzle8MnistGenerator(1, 2)
+        >>> generator.init_state()
+        tensor([1, 2, 3, 8, 0, 4, 7, 6, 5], dtype=torch.int8)
 
         Returns
         -------
-        bool
-            True if the index is beyond the bounds of the grid, False otherwise.
+        Tensor
+            Initial state of the grid.
         """
-        new_index = index + movement
-        return new_index < 0 or new_index > 8
+        return torch.as_tensor(self.order, dtype=torch.int8)
 
-    def _is_incorrect_left(self, index: int, movement: int) -> bool:  # noqa
+    def select(self, sample: PuzzleSample) -> Tensor:
         """
-        Check if the movement to the left is incorrect.
-
-        An example of a movement to the left that is incorrect is when the index
-        is 3 and the movement is -1.
-
-        An example of a movement to the left that is correct is when the index
-        is 1 and the movement is -1.
-
-        ```
-        generator = Puzzle8MnistGenerator()
-
-        result = generator._is_incorrect_left(3, -1)
-        print(result) # True
-
-        result = generator._is_incorrect_left(1, -1)
-        print(result) # False
-        ```
+        Given a PuzzleSample, it selects a Tensor from the sequence of Tensor of
+        the PuzzleSample.
 
         Parameters
         ----------
-        index: int
-            Index of the zero digit.
-        movement: int
-            Movement to check as index shift.
+        sample : Sample
+
+        Examples
+        --------
+        >>> generator = Puzzle8MnistGenerator(1, 2, n=3)
+        >>> sample = (
+        ...     torch.tensor([1, 2, 3, 8, 6, 4, 7, 0, 5], dtype=torch.int8]),
+        ...     (
+        ...         torch.tensor([1, 2, 3, 8, 6, 4, 7, 5, 0], dtype=torch.int8]),
+        ...         torch.tensor([1, 2, 3, 8, 6, 4, 0, 7, 5], dtype=torch.int8]),
+        ...         None,
+        ...         torch.tensor([1, 2, 3, 8, 0, 4, 7, 6, 5], dtype=torch.int8]),
+        ...     )
+        ... )
+        >>> generator.select(sample)
+        torch.tensor([1, 2, 3, 8, 6, 4, 0, 7, 5], dtype=torch.int8)
 
         Returns
         -------
-        bool
-            True if the movement to the left is incorrect, False otherwise.
+        State
+            The selected Tensor.
         """
-        return index % 3 == 0 and movement == -1
-
-    def _is_incorrect_right(self, index: int, movement: int) -> bool:  # noqa
-        """
-        Check if the movement to the right is incorrect.
-
-        An example of a movement to the right that is incorrect is when the index
-        is 2 and the movement is 1.
-
-        An example of a movement to the right that is correct is when the index
-        is 1 and the movement is 1.
-
-        ```
-        generator = Puzzle8MnistGenerator()
-
-        result = generator._is_incorrect_right(2, 1)
-        print(result) # True
-
-        result = generator._is_incorrect_right(1, 1)
-        print(result) # False
-        ```
-
-        Parameters
-        ----------
-        index: int
-            Index of the zero digit.
-        movement: int
-            Movement to check as index shift.
-
-        Returns
-        -------
-        bool
-            True if the movement to the right is incorrect, False otherwise.
-        """
-        return index % 3 == 2 and movement == 1
+        non_none = [s for s in sample[1] if s is not None]
+        return non_none[np.random.randint(len(non_none))]
 
     def is_possible(self, zero_index: int, movement: int) -> bool:
         """
@@ -253,15 +213,14 @@ class Puzzle8MnistGenerator:
         An example of a movement that is possible is when the index is 8 and the
         movement is -3.
 
-        ```
-        generator = Puzzle8MnistGenerator()
+        Examples
+        --------
+        >>> generator = Puzzle8MnistGenerator(1, 2)
+        >>> result = generator.is_possible(0, -1)
+        False
 
-        result = generator.is_possible(0, -1)
-        print(result) # False
-
-        result = generator.is_possible(8, -3)
-        print(result) # True
-        ```
+        >>> result = generator.is_possible(8, -3)
+        True
 
         Parameters
         ----------
@@ -275,290 +234,79 @@ class Puzzle8MnistGenerator:
         bool
             True if the movement is possible, False otherwise.
         """
+        new_index = zero_index + movement
+        is_beyond_bounds = new_index < 0 or new_index > 8
+        is_incorrect_left = zero_index % 3 == 0 and movement == -1
+        is_incorrect_right = zero_index % 3 == 2 and movement == 1
+
         return not (
-            self._is_beyond_bounds(zero_index, movement)
-            or self._is_incorrect_left(zero_index, movement)
-            or self._is_incorrect_right(zero_index, movement)
+            is_beyond_bounds or is_incorrect_left or is_incorrect_right
         )
 
-    def zero_index(self, order: Tensor) -> int:  # noqa
+    def move(self, state: Tensor, action: int) -> Tensor | None:
         """
-        Get the index of the zero digit.
+        Move the zero digit on the order based on the movement. If the movement
+        is not possible, None is returned.
 
-        An example of use is:
+        Examples
+        --------
+        >>> state = torch.tensor([ 1, 2, 3, 8, 6, 4, 7, 0, 5])
+        >>> generator = Puzzle8MnistGenerator(1, 2)
 
-        ```
-        generator = Puzzle8MnistGenerator()
+        >>> generator.move(state, 1)
+        tensor([ 1, 2, 3, 8, 6, 4, 7, 5, 0])
 
-        order = torch.tensor([ 1, 2, 3, 8, 0, 4, 7, 6, 5])
-        zero_index = generator.zero_index(order)
-
-        print(zero_index) # 4
-        ```
+        >>> # As a grid
+        >>> # 1 2 3
+        >>> # 8 4 0
+        >>> # 7 6 5
 
         Parameters
         ----------
-        order: Tensor
+        state: Tensor
             Order of the grid.
-
-        Returns
-        -------
-        int
-            Index of the zero digit.
-        """
-        return np.where(order == 0)[0][0].item()
-
-    def move(self, order: Tensor, movement: int) -> Tensor:
-        """
-        Move the zero digit on the order based on the movement.
-
-        An example of use is:
-
-        ```
-        order = [ 1, 2, 3, 8, 0, 4, 7, 6, 5]
-        generator = Puzzle8MnistGenerator(order)
-
-        new_order, new_zero_index = generator.move(order, 1)
-
-        print(new_order) # [ 1, 2, 3, 8, 4, 0, 7, 6, 5]
-
-        # As a grid
-        # 1 2 3
-        # 8 4 0
-        # 7 6 5
-        ```
-
-        Parameters
-        ----------
-        order: Tensor
-            Order of the grid.
-        movement: int
-            Movement to check as index shift.
-
-        Raises
-        ------
-        ValueError
-            If the movement is not possible.
+        action: int
+            Index of the action to apply.
 
         Returns
         -------
         Tensor
             New order.
         """
-        zero_index = self.zero_index(order)
+        movement = ACTION_TO_MOVEMENT[action]
+
+        zero_index = np.where(state == 0)[0][0].item()
         if not self.is_possible(zero_index, movement):
-            raise ValueError("The movement is not possible")
+            return None
 
-        return self._move(order, zero_index, movement)[0]
-
-    def _move(  # noqa
-        self, order: Tensor, zero_index: int, movement: int
-    ) -> Tuple[Tensor, int]:
-        """
-        Move the zero digit on the order based on the movement.
-
-        An example of use is:
-
-        ```
-        order = [ 1, 2, 3, 8, 0, 4, 7, 6, 5]
-        generator = Puzzle8MnistGenerator(order)
-
-        new_order, new_zero_index = generator.move(order, 4, 1)
-
-        print(new_order) # [ 1, 2, 3, 8, 4, 0, 7, 6, 5]
-
-        # As a grid
-        # 1 2 3
-        # 8 4 0
-        # 7 6 5
-        ```
-
-        Parameters
-        ----------
-        order:
-            Order of the grid.
-        zero_index: int
-            Index of the zero digit.
-        movement:
-            Movement to check as index shift.
-
-        Returns
-        -------
-        Tuple[Tensor, int]
-            New order and new index of the zero digit.
-        """
         new_index = zero_index + movement
 
-        new_order = order.clone()
+        new_order = state.clone()
         new_order[zero_index] = new_order[new_index]
         new_order[new_index] = 0
 
-        return new_order, new_index
+        return new_order
 
-    def _all_moves(self, order: Tensor, zero_index: int) -> Tuple[Tensor, int, Tensor]:
-        """
-        Get all the possible moves from the current order.
+    def image(self, state: Tensor) -> Tensor:
+        """Returns the image of the grid based on the state.
 
-        An example of use is:
-
-        ```
-        generator = Puzzle8MnistGenerator()
-
-        order = torch.tensor([ 1, 0, 3, 8, 2, 4, 7, 6, 5])
-        zero_index = generator.zero_index(order)
-
-        new_order, new_zero_index, movement_label, movements_labels = generator._all_moves(order, zero_index)
-
-        print(new_order) # [ 1, 2, 3, 8, 0, 4, 7, 6, 5] random movement which is possible
-        print(new_zero_index) # 4
-        print(movement_label) # 3
-        print(movements_labels) # [0, 1, 4, 3] The four shows that the up movement is not possible
-        ```
+        Example
+        -------
+        >>> generator = Puzzle8MnistGenerator(1, 2)
+        >>> state = [ 1, 2, 3, 8, 0, 4, 7, 6, 5]
+        >>> generator.image(state)
+        tensor([[[0.0000, 0.0000, 0.0000,  ..., 0.0000, 0.0000, 0.0000], ...], ...])
 
         Parameters
         ----------
-        order: Tensor
-            Order of the grid.
-        zero_index: int
-            Index of the zero digit.
+        state: Tensor
+            State of the grid.
 
         Returns
         -------
-        Tuple[Tensor, int, Tensor]
-            New order, new index of the zero digit and labels of the movements
-            or 4 if the movement is not possible.
+        Tensor
+            Image of the grid.
         """
-        movements_labels = torch.full((4,), 4, dtype=torch.int64)
-        movements = movements_labels.clone()
-
-        for index, movement in enumerate(MOVEMENTS):
-            if self.is_possible(zero_index, movement):
-                movements_labels[index] = MOVEMENT_TO_LABEL["puzzle8"][movement]
-                movements[index] = movement
-
-        movement_to_apply = np.random.choice(movements[movements != 4])
-        order, zero_index = self._move(order, zero_index, movement_to_apply)
-
-        return (
-            order,
-            zero_index,
-            movements_labels,
-        )
-
-    def random_move(
-        self, current_order: Tensor, zero_index: int
-    ) -> Tuple[Tensor, int, int]:
-        """
-        Get a random move from the current order.
-
-        An example of use is:
-
-        ```
-        generator = Puzzle8MnistGenerator()
-
-        order = torch.tensor([ 1, 0, 3, 8, 2, 4, 7, 6, 5])
-        zero_index = generator.zero_index(order)
-
-        new_order, new_zero_index, movement_label = generator.random_move(order, zero_index)
-
-        print(new_order) # [ 1, 2, 3, 8, 0, 4, 7, 6, 5] random movement which is possible
-        print(new_zero_index) # 4
-        print(movement_label) # 3
-        ```
-
-        Parameters
-        ----------
-        current_order: Tensor
-            Order of the grid.
-        zero_index: int
-            Index of the zero digit.
-
-        Returns
-        -------
-        Tuple[Tensor, int, int]
-            New order, new index of the zero digit and label of the movement.
-        """
-        movement = random.choice(MOVEMENTS)
-        if not self.is_possible(zero_index, movement):
-            movement = -1 * movement
-        new_order, new_index = self._move(current_order, zero_index, movement)
-        return new_order, new_index, MOVEMENT_TO_LABEL["puzzle8"][movement]
-
-    def random_sequence(
-        self, size: int, all_moves: bool = False
-    ) -> Tuple[Tensor, Tensor]:
-        """
-        Get a random sequence of unordered moves from the original order.
-
-        An example of use is:
-
-        ```
-        generator = Puzzle8MnistGenerator()
-
-        orders, movements = generator.random_sequence(10)
-
-        print(orders) # [[ 1, 2, 3, 8, 0, 4, 7, 6, 5], [ 1, 2, 3, 8, 4, 0, 7, 6, 5], ...]
-        print(movements) # [3, 4, ...]
-        ```
-
-        Parameters
-        ----------
-        size: int
-            Size of the sequence.
-        all_moves: bool
-            If True, all the possible moves are returned, otherwise a random
-            move is returned.
-
-        Returns
-        -------
-        Tuple[Tensor, Tensor]
-            Sequence of orders and sequence of movements.
-        """
-        order = self.order.clone()
-        zero_index = self.zero_index(order)
-
-        total_size = size * 4
-        moves_size = total_size
-        method = self.random_move
-        if all_moves:
-            method = self._all_moves
-            moves_size = (total_size, 4)
-
-        orders = torch.zeros((total_size, 9), dtype=torch.int8)
-        movements = torch.zeros(moves_size, dtype=torch.int64)
-
-        for i in range(total_size):
-            orders[i] = order
-            order, zero_index, movement = method(order, zero_index)
-            movements[i] = movement
-
-        choices = np.random.choice(np.arange(0, total_size), size)
-
-        return orders[choices], movements[choices]
-
-    def get(self, order: Sequence) -> torch.Tensor:
-        """Returns the 8-puzzle wrote on 'sequence'.
-
-        An example of use is:
-
-        ```
-        generator = Puzzle8MnistGenerator()
-
-        order = [ 1, 2, 3, 8, 0, 4, 7, 6, 5]
-        image = generator.get(order)
-
-        print(image.shape) # torch.Size([28, 28])
-        ```
-
-        Parameters
-        ----------
-        order: np.ndarray
-            Indices of the digits on the dataset.
-
-        Returns
-        -------
-        torch.Tensor
-            Image of the 8-Puzzle generated."""
         base_image = torch.zeros((28 * 3, 28 * 3))
         for column in range(3):
             for row in range(3):
@@ -568,102 +316,10 @@ class Puzzle8MnistGenerator:
                 xmax = xmin + 28
 
                 index = row * 3 + column
-                digit = order[index].item()
+                digit = state[index].item()
 
                 image, _ = self.dataset[np.random.choice(self.digits_indices[digit])]
 
                 base_image[xmin:xmax, ymin:ymax] = image
 
-        return base_image
-
-
-class Puzzle8MnistDataset(Dataset):
-    """
-    Dataset of 8-Puzzle images.
-
-    An example of use is:
-
-    ```
-    dataset = Puzzle8MnistDataset(16, 32)
-
-    print(len(dataset)) # 512 = 16 * 32
-
-    image, moved_image, movements = dataset[0]
-
-    print(image.shape) # torch.Size([32, 1, 28, 28])
-    print(moved_image.shape) # torch.Size([32, 1, 28, 28])
-    print(movements.shape) # torch.Size([32, 5])
-    ```
-
-    Parameters
-    ----------
-    size: int
-        Size of the images.
-    num_batches: int
-        Number of batches.
-    batch_size: int
-        Size of each batch.
-    transformations: Optional[Callable]
-        Transformations to apply to the images.
-    """
-
-    def __init__(
-        self, size: int, num_batches: int, batch_size: int, transformations=None
-    ):
-        self._length = num_batches * batch_size
-        self.transforms = transformations
-        self.size = size
-        self.resize = transforms.Resize((size, size))
-        self.data = Puzzle8MnistGenerator(order=[1, 2, 3, 8, 0, 4, 7, 6, 5])
-
-        self.orders = torch.zeros((self._length, 9), dtype=torch.int8)
-        movements = torch.zeros((self._length, 4), dtype=torch.int64)
-        for i in range(num_batches):
-            current_index = i * batch_size
-            orders, moves = self.data.random_sequence(batch_size, all_moves=True)
-
-            self.orders[current_index : current_index + batch_size] = orders
-            movements[current_index : current_index + batch_size] = moves
-
-        self.movements = one_hot(movements, num_classes=5)
-
-    def __len__(self):
-        return self._length
-
-    def _apply_movement(self, order: Tensor, movements: Tensor) -> Tensor:
-        """
-        Apply the movement to the order.
-
-        Parameters
-        ----------
-        order: Tensor
-            Order of the grid.
-        movements:
-            Movements to apply.
-
-        Returns
-        -------
-        Tensor
-            New order.
-        """
-        images_moved = torch.zeros((4, 1, self.size, self.size))
-        for index, move in enumerate(movements):
-            if torch.all(move[-1] != 1):
-                images_moved[index] = self.resize(
-                    self.data.get(
-                        self.data.move(order, LABEL_TO_MOVEMENT["puzzle8"][index])
-                    ).unsqueeze(0)
-                )
-        return images_moved.squeeze()
-
-    def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor, Tensor]:
-        order = self.orders[idx]
-        movement = self.movements[idx]
-
-        image = self.resize(self.data.get(order).unsqueeze(0))
-        images_moved = self._apply_movement(order, movement)
-
-        if self.transforms is not None:
-            image = self.transforms(image)
-
-        return image, images_moved, movement
+        return base_image.unsqueeze(0)
