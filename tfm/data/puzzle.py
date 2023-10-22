@@ -6,12 +6,13 @@ from torchvision import transforms
 
 from tfm.constants.app import ROOT
 from tfm.constants.puzzle import DEFAULT_ORDER, ACTION_TO_MOVEMENT
-from tfm.constants.types import PuzzleSample
+from tfm.constants.types import TensorSample
 from tfm.data.base import BaseGenerator
 from tfm.utils.puzzle import has_correct_order
 
 
 class Puzzle8MnistGenerator(BaseGenerator):
+    # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences
     """This class is used to manage the generation of 8-puzzle data. The 8-puzzle
     problem is based on ordering a grid of 3x3 with 8 digits and a blank space.
     The digits are from 1 to 8 and the blank space is represented by 0. The
@@ -152,6 +153,7 @@ class Puzzle8MnistGenerator(BaseGenerator):
                 break
 
     def init_state(self) -> Tensor:
+        # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences
         """
         Get the initial state of the grid. The initial state is the order of the
         grid.
@@ -169,7 +171,8 @@ class Puzzle8MnistGenerator(BaseGenerator):
         """
         return torch.as_tensor(self.order, dtype=torch.int8)
 
-    def select(self, sample: PuzzleSample) -> Tensor:
+    def select(self, sample: TensorSample) -> Tensor:
+        # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences,GrazieInspection
         """
         Given a PuzzleSample, it selects a Tensor from the sequence of Tensor of
         the PuzzleSample.
@@ -202,6 +205,7 @@ class Puzzle8MnistGenerator(BaseGenerator):
         return non_none[np.random.randint(len(non_none))]
 
     def is_possible(self, zero_index: int, movement: int) -> bool:
+        # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences
         """
         Check if the movement is possible. A movement is possible if is not
         beyond the bounds of the grid, is not incorrect to the left and is not
@@ -244,6 +248,7 @@ class Puzzle8MnistGenerator(BaseGenerator):
         )
 
     def move(self, state: Tensor, action: int) -> Tensor | None:
+        # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences
         """
         Move the zero digit on the order based on the movement. If the movement
         is not possible, None is returned.
@@ -288,6 +293,7 @@ class Puzzle8MnistGenerator(BaseGenerator):
         return new_order
 
     def image(self, state: Tensor) -> Tensor:
+        # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences
         """Returns the image of the grid based on the state.
 
         Example

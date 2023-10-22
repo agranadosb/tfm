@@ -173,6 +173,7 @@ class LightsOutGenerator(BaseGenerator):
         return torch.ones(self.n * self.n, dtype=torch.bool)
 
     def select(self, sample: LightsSample) -> Tensor:
+        # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences
         """
         Given a LightsSample, it selects a Tensor from the sequence of Tensor of
         the LightsSample.
