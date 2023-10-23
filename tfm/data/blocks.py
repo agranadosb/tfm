@@ -45,14 +45,14 @@ class BlocksWorldGenerator(BaseGenerator):
     >>> torch.tensor([-1, -2, -1, 2])
 
     Regarding actions, there is `1 + n + m` actions per block. It means that we
-    can move each block to the top of another block, to the table or to a
+    can move each block to the table, to the top of another block, or to a
     crane. It's possible that some of the actions are not valid. For
     example, if we try to move a block to the top of another block that is
     on a crane. In that case, the action is not valid. So, the actions are:
 
-    - Move to the table: 0
-    - Move to the block i for each block i: 1, 2, ..., n
-    - Move to the crane j for each crane j: -1 - 1, -1 - 2, ..., -1 - m
+    - Move to the table: index 0
+    - Move to the block i for each block i: indices 1, 2, ..., n
+    - Move to the crane j for each crane j: indices n + 1, n + 2, ..., n + m
 
     Knowing that, each Sample is a tuple of two elements. The first element
     is the state, and the second element is a sequence of possible actions.
@@ -116,6 +116,16 @@ class BlocksWorldGenerator(BaseGenerator):
         self.blocks = blocks
         self.cranes = cranes
 
+        self.block_size = 32
+        self.crane_height = 64
+        self.crane_width = 4
+        self.margin_size = 8
+
+        color_increment = 255 // blocks
+        self.colors = [
+            i * color_increment for i in range(blocks)
+        ]
+
     def init_state(self) -> Tensor:
         # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences
         """
@@ -172,8 +182,158 @@ class BlocksWorldGenerator(BaseGenerator):
         non_none = [s for s in sample[1] if s is not None]
         return non_none[np.random.randint(len(non_none))]
 
+    def occupied(self, state: Tensor, item: int) -> int:
+        # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences
+        """
+        Given a state and an item it checks if the item occupied by another. If
+        the item is a block, then it checks if the block is under another and
+        if the item is a crane, then it checks if the crane is occupied.
+
+        Parameters
+        ----------
+        state : State
+            The state of the problem.
+        item : int
+            The item to check if it's occupied.
+
+        Examples
+        --------
+        >>> generator = BlocksWorldGenerator(1, 2, blocks=2, cranes=1)
+        >>> state = torch.tensor([-1, -1])
+        >>> generator.occupied(state, 0)
+        False
+
+        >>> state = torch.tensor([-1, -2])
+        >>> generator.occupied(state, -2)
+        True
+
+        Returns
+        -------
+        bool
+            True if the item is occupied, False otherwise.
+        """
+        return len((state == item).nonzero().squeeze()) > 0
+
     def move(self, state: Tensor, action: int) -> Tensor | None:
-        pass
+        # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences
+        """
+        Given a state and an action, it returns the new state after applying
+        the action. If the action is not valid, it returns None.
+
+        First of all, the action is divided into three parts: block and where
+        to move it. Then we check if this block is under another block. If
+        it's under another block, then the action is not valid. After this,
+        we check if the action is to move it to itself. If it's the case,
+        then the action is not valid.
+
+        Then we check if the action is to move it to the table. If it's the
+        case, then we move it to the table and return the new state. If the
+        action is to move it to another block or to a crane, then we check if
+        the object is occupied by another block. If it's the case, then the
+        action is not valid.
+
+        If it's not the case, then we move the block to the object and return
+        the new state. To get the id of the object we take into account the
+        way we have defined the possible actions.
+
+        Am action is a number between 0 and (1 + n + m) * n - 1. This can be
+        represented on the next way:
+
+        - Possible action to apply to the block 0
+        - Possible action to apply to the block 1
+        - ...
+        - Possible action to apply to the block n - 1
+
+        The possible actions to apply to the block i are:
+
+        - Move it to the table
+        - Move it to the block 0
+        - Move it to the block 1
+        - ...
+        - Move it to the block n - 1
+        - Move it to the crane -2
+        - Move it to the crane -3
+        - ...
+        - Move it to the crane -2 - m + 1
+
+        So it can be represented as a matrix of shape (n, 1 + n + m), where
+        each row represents the possible actions to apply to the block i.
+
+        >>> # block 0     -> [0, 1, 2, ..., n, n + 1, n + 2, ..., n + m]
+        >>> # block 1     -> [0, 1, 2, ..., n, n + 1, n + 2, ..., n + m]
+        >>> # ...
+        >>> # block n - 1 -> [0, 1, 2, ..., n, n + 1, n + 2, ..., n + m]
+
+        The mapping between the action and the object is:
+
+        >>> # block 0     -> [-1, 0, 1, ..., n - 1, -2, -3, ..., -2 - m + 1]
+        >>> # block 1     -> [-1, 0, 1, ..., n - 1, -2, -3, ..., -2 - m + 1]
+        >>> # ...
+        >>> # block n - 1 -> [-1, 0, 1, ..., n - 1, -2, -3, ..., -2 - m + 1]
+
+        So here is the explanation of how we can get the object id from the
+        action:
+
+        >>> # We get the block id and the object id
+        >>> block, item = divmod(action, n + m + 1)
+        >>> # If the action is to move it to the table
+        >>> new_state[block] = -1
+        >>> # If the action is to move it to another block
+        >>> new_state[block] = item - 1
+        >>> # If the action is to move it to a crane
+        >>> new_state[block] = item - (1 + n) - 2
+
+        Parameters
+        ----------
+        state : State
+            The state of the problem.
+        action : int
+            The action to apply to the state.
+
+        Examples
+        --------
+        >>> generator = BlocksWorldGenerator(1, 2, blocks=2, cranes=1)
+        >>> state = torch.tensor([1, -1])
+        >>> generator.move(state, 0)
+        tensor([-1, -1])
+
+        >>> generator.move(state, 1)
+        None
+
+        Returns
+        -------
+        State
+            The new state after applying the action.
+        """
+        new_state = state.clone()
+        block, item = divmod(action, self.blocks + self.cranes + 1)
+
+        # The block is under another block
+        if self.occupied(state, block):
+            return None
+
+        # The action is move it to itself
+        if block == item - 1:
+            return None
+
+        # Check if the action is to move it to the table
+        if item == 0:
+            new_state[block] = -1
+            return new_state
+
+        # If the action to move the block to an object that is occupied by
+        # another block
+        if self.occupied(state, item):
+            return None
+
+        # If the action is to move to a crane, then object index is negative
+        if item > self.blocks:
+            new_state[block] = item - (1 + self.blocks) - 2
+        else:
+            # The action is move it to another block
+            new_state[block] = item - 1
+
+        return new_state
 
     def image(self, state: Tensor) -> Tensor:
         pass
