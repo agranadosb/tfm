@@ -103,16 +103,20 @@ class BlocksWorldGenerator(BaseGenerator):
     cranes: int
         The number of cranes in the problem.
     """
+
     def __init__(
         self,
         sequences: int,
         sequence_length: int,
-        *, /,
+        /,
+        *,
         blocks: int,
         cranes: int,
         shuffle: bool = True,
     ):
-        super().__init__(sequences, sequence_length, blocks * cranes + 1, shuffle=shuffle)
+        super().__init__(
+            sequences, sequence_length, blocks * (blocks + cranes + 1), shuffle=shuffle
+        )
         self.blocks = blocks
         self.cranes = cranes
 
@@ -120,11 +124,23 @@ class BlocksWorldGenerator(BaseGenerator):
         self.crane_height = 64
         self.crane_width = 4
         self.margin_size = 8
+        self.cell_width = self.block_size + self.margin_size
+        self.start_towers = self.cell_width * cranes
 
-        color_increment = 255 // blocks
-        self.colors = [
-            i * color_increment for i in range(blocks)
-        ]
+        color_increment = 200 // blocks
+        self.colors = [(i + 1) * color_increment for i in range(blocks)]
+
+        self.height = max(self.crane_height + self.block_size, self.block_size * self.blocks)
+        self.width = self.cell_width * (blocks + cranes)
+        self.image_template = torch.zeros(
+            (self.height, self.width), dtype=torch.uint8
+        )
+        self.crane_block_start = self.height - self.crane_height
+
+        for index in range(cranes):
+            self.image_template[
+                :, index * self.cell_width : self.cell_width * (index + 1),
+            ] = self.draw_crane()
 
     def init_state(self) -> Tensor:
         # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences
@@ -212,7 +228,7 @@ class BlocksWorldGenerator(BaseGenerator):
         bool
             True if the item is occupied, False otherwise.
         """
-        return len((state == item).nonzero().squeeze()) > 0
+        return len((state == item).nonzero().squeeze(-1)) > 0
 
     def move(self, state: Tensor, action: int) -> Tensor | None:
         # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences
@@ -305,35 +321,134 @@ class BlocksWorldGenerator(BaseGenerator):
         State
             The new state after applying the action.
         """
-        new_state = state.clone()
         block, item = divmod(action, self.blocks + self.cranes + 1)
+        if item == 0:
+            return self.to_table(state, block)
+        if item <= self.blocks:
+            return self.to_block(state, block, item - 1)
+        return self.to_crane(state, block, -(item - (1 + self.blocks) + 2))
 
-        # The block is under another block
+    def to_table(self, state: Tensor, block: int) -> Tensor | None:
         if self.occupied(state, block):
             return None
 
-        # The action is move it to itself
-        if block == item - 1:
+        if state[block] > -2:
             return None
 
-        # Check if the action is to move it to the table
-        if item == 0:
-            new_state[block] = -1
-            return new_state
-
-        # If the action to move the block to an object that is occupied by
-        # another block
-        if self.occupied(state, item):
-            return None
-
-        # If the action is to move to a crane, then object index is negative
-        if item > self.blocks:
-            new_state[block] = item - (1 + self.blocks) - 2
-        else:
-            # The action is move it to another block
-            new_state[block] = item - 1
-
+        new_state = state.clone()
+        new_state[block] = -1
         return new_state
 
+    def to_crane(self, state: Tensor, block: int, crane: int) -> Tensor | None:
+        if self.occupied(state, block):
+            return None
+
+        if self.occupied(state, crane) or state[block] <= -2:
+            return None
+
+        new_state = state.clone()
+        new_state[block] = crane
+        return new_state
+
+    def to_block(self, state: Tensor, block: int, another: int) -> Tensor | None:
+        if self.occupied(state, block):
+            return None
+
+        if block == another:
+            return None
+
+        if state[block] > -2:
+            return None
+
+        if self.occupied(state, another):
+            return None
+
+        new_state = state.clone()
+        new_state[block] = another
+        return new_state
+
+    def towers(self, state: Tensor) -> list[list[int]]:
+        mapping = {}
+        top_blocks = (set(
+            range(self.blocks))
+            - set(state.tolist() + (state <= -2).nonzero().squeeze(-1).tolist())
+        )
+        for block, behind in enumerate(state):
+            behind = behind.item()
+            if behind > -2:
+                mapping[block] = behind
+
+        towers = []
+        for block in top_blocks:
+            tower = []
+            while block != -1:
+                tower.append(block)
+                block = mapping[block]
+            towers.append(tower)
+
+        return towers
+
+    def draw_tower(self, blocks: list[int]) -> Tensor:
+        tower = torch.zeros(
+            (self.block_size * len(blocks), self.block_size),
+            dtype=torch.uint8,
+        )
+
+        for index, block in enumerate(blocks):
+            tower[
+                index * self.block_size : index * self.block_size + self.block_size,
+                0 : self.block_size,
+            ] = self.draw_block(block)
+
+        return tower
+
+    def draw_block(self, block: int) -> Tensor:
+        return torch.full(
+            (self.block_size, self.block_size),
+            self.colors[block],
+            dtype=torch.uint8,
+        )
+
+    def draw_crane(self) -> Tensor:
+        crane_image = torch.zeros(
+            (self.height, self.cell_width),
+            dtype=torch.uint8,
+        )
+
+        start_x = self.margin_size + self.block_size // 2 - self.crane_width // 2
+        crane_image[
+            self.crane_block_start :,
+            start_x : start_x + self.crane_width,
+        ] = 255
+
+        return crane_image
+
     def image(self, state: Tensor) -> Tensor:
-        pass
+        image = self.image_template.clone()
+
+        towers = self.towers(state)
+        for tower in towers:
+            index = tower[-1]
+            tower_image = self.draw_tower(tower)
+
+            start_x = self.start_towers + index * self.cell_width + self.margin_size
+            start_y = self.height - tower_image.shape[0]
+            image[
+                start_y : start_y + tower_image.shape[0],
+                start_x : start_x + tower_image.shape[1],
+            ] = tower_image
+
+        crane_blocks = (state <= -2).nonzero().squeeze(-1)
+        for block in crane_blocks:
+            crane_id = state[block]
+            crane_index = -1 * (crane_id + 2)
+
+            y_block = self.crane_block_start - self.block_size
+            x_block = crane_index * self.cell_width + self.margin_size
+
+            image[
+                y_block : y_block + self.block_size,
+                x_block : x_block + self.block_size,
+            ] = self.draw_block(block)
+
+        return image.unsqueeze(0)
