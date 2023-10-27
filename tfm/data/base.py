@@ -70,7 +70,9 @@ class BaseGenerator(ABC):
         If True, the sequences are shuffled, by default True.
     """
 
-    def __init__(self, sequences: int, sequence_length: int, actions: int, shuffle: bool = True):
+    def __init__(
+        self, sequences: int, sequence_length: int, actions: int, shuffle: bool = True
+    ):
         self.indices = None
         self.sequences = sequences
         self.sequence_length = sequence_length
@@ -132,20 +134,20 @@ class BaseGenerator(ABC):
         Given a "State", it returns another "State" applying an action `action`
         to the given "State". If the action can't be applied to the given
         "State", it returns "None"
-        
+
         Parameters
         ----------
         state : State
             The initial "State".
         action : int
             The action to apply to the given "State".
-        
+
         Examples
         --------
         >>> generator = ClassInheritingBaseGenerator(sequences=1, sequence_length=2)
         >>> generator.move('state', 1)
         'new-state-1'
-        
+
         >>> generator.move('state2')
         None
 
@@ -280,9 +282,7 @@ class BaseGenerator(ABC):
         sequence = []
 
         for _ in range(self.sequence_length * 4):
-            states = (
-                self.move(current_state, index) for index in range(self.actions)
-            )
+            states = (self.move(current_state, index) for index in range(self.actions))
             sample = current_state, tuple(states)
             current_state = self.select(sample)
             sequence.append(sample)
@@ -290,9 +290,11 @@ class BaseGenerator(ABC):
         if shuffle:
             random.shuffle(sequence)
 
-        return sequence[:self.sequence_length]
+        return sequence[: self.sequence_length]
 
-    def save_sample(self, sample: list[Sample], path: str, index: int) -> "BaseGenerator":
+    def save_sample(
+        self, sample: list[Sample], path: str, index: int
+    ) -> "BaseGenerator":
         # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences
         """
         Save a "Sample" in the given path. The "Sample" will be saved in a

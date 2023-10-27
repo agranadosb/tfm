@@ -134,12 +134,13 @@ class LightsOutGenerator(BaseGenerator):
         self,
         sequences: int,
         sequence_length: int,
-        /, *,
+        /,
+        *,
         n: int,
         shuffle: bool = True,
         size: int = 32,
         line_value: int = 128,
-        line_length: int = 4
+        line_length: int = 4,
     ):
         super().__init__(sequences, sequence_length, n * n, shuffle)
         self.n = n
@@ -385,7 +386,9 @@ class LightsOutGenerator(BaseGenerator):
             (n * (size + 2), n * (size + 2)).
         """
         square_size = self.size + self.line_length * 2
-        image = torch.zeros(self.n * square_size, self.n * square_size, dtype=torch.uint8)
+        image = torch.zeros(
+            self.n * square_size, self.n * square_size, dtype=torch.uint8
+        )
         for i in range(self.n):
             for j in range(self.n):
                 # Get index on the vector state

@@ -112,13 +112,12 @@ class Puzzle8MnistGenerator(BaseGenerator):
         self,
         sequences: int,
         sequence_length: int,
-        /, *,
+        /,
+        *,
         order: list[int] = None,
         shuffle: bool = True,
     ):
-        super().__init__(
-            sequences, sequence_length, actions=4, shuffle=shuffle
-        )
+        super().__init__(sequences, sequence_length, actions=4, shuffle=shuffle)
         if order is None:
             order = DEFAULT_ORDER
 
@@ -243,9 +242,7 @@ class Puzzle8MnistGenerator(BaseGenerator):
         is_incorrect_left = zero_index % 3 == 0 and movement == -1
         is_incorrect_right = zero_index % 3 == 2 and movement == 1
 
-        return not (
-            is_beyond_bounds or is_incorrect_left or is_incorrect_right
-        )
+        return not (is_beyond_bounds or is_incorrect_left or is_incorrect_right)
 
     def move(self, state: Tensor, action: int) -> Tensor | None:
         # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences

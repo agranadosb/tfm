@@ -58,7 +58,7 @@ def hyperparameter_tuning(block: str, samples: int, epochs: int):
         "movements": 4,
         "block": BLOCKS[block],
         "hyp": True,
-        "dataset": PUZZLE_DATASET
+        "dataset": PUZZLE_DATASET,
     }
     search_space = {
         # Training configuration
