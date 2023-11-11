@@ -1,19 +1,20 @@
 import os
-from typing import Dict, Any, Union
+from typing import Dict, Union
 
 import bentoml
-import pytorch_lightning as pl
 import yaml
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import WandbLogger  # noqa
+from lightning import Trainer as LightningTrainer
+from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.loggers import WandbLogger
 
+from tfm.conf.app import configure
 from tfm.constants import BLOCKS
-from tfm.data.base import DataModule
+from tfm.data.dataset import BaseDataModule
 from tfm.model.trainer import Trainer
 from tfm.utils.data import current_datetime
 
 
-def train(config: Union[Dict[str, Any], str], project: str, epochs: int):
+def train(config: str, project: str, epochs: int):
     """
     This function trains and evaluates a model using the configuration provided.
 
@@ -47,20 +48,18 @@ def train(config: Union[Dict[str, Any], str], project: str, epochs: int):
     epochs: int
         Number of epochs to train the model.
     """
-    if isinstance(config, str):
-        with open(config, "r") as stream:
-            config = yaml.safe_load(stream)
+    configuration = configure(config)
 
-            config["block"] = BLOCKS[config["block"]]
+    os.environ["WANDB_API_KEY"] = "local-2cdcb89d8ebf517dcfc2ac3c36e14a740d235c15"
 
     logger = None
     run_name = f"full-training-{current_datetime()}"
-    if config.get("log", True):
+    if configuration.model.log:
         try:
             logger = WandbLogger(project=project, name=run_name)
         except ModuleNotFoundError:
             print("Wandb not found. Logging won't be done.")
-            config["log"] = False
+            configuration.model.log = False
 
     callbacks = [
         ModelCheckpoint(
@@ -72,20 +71,16 @@ def train(config: Union[Dict[str, Any], str], project: str, epochs: int):
         )
     ]
 
-    trainer = pl.Trainer(
+    trainer = LightningTrainer(
         max_epochs=epochs,
         logger=logger,
         enable_checkpointing=True,
         callbacks=callbacks,
     )
+
     trainer.fit(
-        model=Trainer(config),
-        datamodule=DataModule(
-            config["batch_size"],
-            config["input_size"],
-            config["num_workers"],
-            config["dataset"],
-        ),
+        model=Trainer(configuration),
+        datamodule=BaseDataModule("data", configuration),
     )
 
 

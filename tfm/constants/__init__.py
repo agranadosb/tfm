@@ -8,6 +8,7 @@ MOVEMENTS = [*LEFT_RIGHT_MOVEMENTS, *TOP_BOT_MOVEMENTS]
 
 PUZZLE_DATASET = "puzzle8"
 LIGHTS_DATASET = "lights-out"
+BLOCKS_DATASET = "blocks"
 
 LABEL_TO_STRING = {
     PUZZLE_DATASET: {
@@ -17,10 +18,12 @@ LABEL_TO_STRING = {
         3: "Top",
     },
     LIGHTS_DATASET: {i: f"Light {i}" for i in range(25)},
+    BLOCKS_DATASET: {i: f"Light {i}" for i in range(48)},
 }
 MOVEMENT_TO_LABEL = {
     PUZZLE_DATASET: {1: 0, -1: 1, 3: 2, -3: 3},
     LIGHTS_DATASET: {i: i for i in range(25)},
+    BLOCKS_DATASET: {i: i for i in range(48)},
 }
 LABEL_TO_MOVEMENT = {
     PUZZLE_DATASET: {
@@ -28,6 +31,9 @@ LABEL_TO_MOVEMENT = {
     },
     LIGHTS_DATASET: {
         value: key for key, value in MOVEMENT_TO_LABEL[LIGHTS_DATASET].items()
+    },
+    BLOCKS_DATASET: {
+        value: key for key, value in MOVEMENT_TO_LABEL[BLOCKS_DATASET].items()
     },
 }
 

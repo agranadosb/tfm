@@ -5,6 +5,7 @@ from pathlib import Path
 
 from torch import Tensor
 from torchvision.utils import save_image
+from tqdm import tqdm
 
 from tfm.constants.types import State, Sample
 
@@ -184,7 +185,7 @@ class BaseGenerator(ABC):
         """
         ...
 
-    def save(self, path: str, sample: list[Sample]) -> "BaseGenerator":
+    def save(self, path: str, samples: list[Sample]) -> "BaseGenerator":
         # noinspection PyShadowingNames,PyTypeChecker,PyUnresolvedReferences
         """
         Save a list of "Samples" in the given path. Each "Sample" will be
@@ -197,7 +198,7 @@ class BaseGenerator(ABC):
         ----------
         path : str
             The path where the "Samples" will be saved.
-        sample : list[Sample]
+        samples : list[Sample]
             The list of "Samples" to save.
 
         Examples
@@ -233,9 +234,9 @@ class BaseGenerator(ABC):
         >>> generator.indices
         [3, 2]
         """
-        for state, states in sample:
+        for sample in samples:
             index = self.indices.pop()
-            self.save_sample(state, path, self.indices.pop())
+            self.save_sample(sample, path, index)
 
             state_file = Path(path) / str(index) / "state"
             actions_folder = Path(path) / str(index) / "actions"
@@ -346,17 +347,23 @@ class BaseGenerator(ABC):
         path = Path(path)
         if not path.exists():
             path.mkdir()
-        for state, states in sample:
-            state_path = path / str(index)
-            state_path.mkdir()
 
-            tensor_image = self.image(state)
-            save_image(tensor_image, state_path / "state" / "state.png")
+        state, states = sample
+        sample_path = path / str(index)
+        sample_path.mkdir()
 
-            for i, s in enumerate(states):
-                if s is not None:
-                    tensor_image = self.image(s)
-                    save_image(tensor_image, state_path / "actions" / f"{i}.png")
+        state_path = sample_path / "state"
+        state_path.mkdir()
+        actions_path = sample_path / "actions"
+        actions_path.mkdir()
+
+        tensor_image = self.image(state) / 255.0
+        save_image(tensor_image, state_path / "state.png")
+
+        for i, s in enumerate(states):
+            if s is not None:
+                tensor_image = self.image(s) / 255.0
+                save_image(tensor_image, actions_path / f"{i}.png")
 
         return self
 
@@ -399,7 +406,7 @@ class BaseGenerator(ABC):
         if shuffle:
             random.shuffle(self.indices)
 
-        for i in range(self.sequences):
+        for _ in tqdm(range(self.sequences)):
             self.save(path, self.sequence(shuffle=shuffle))
 
         return self

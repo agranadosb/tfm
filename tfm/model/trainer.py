@@ -1,13 +1,12 @@
 import io
-from typing import Any, Dict
 
 import PIL
 import numpy as np
 import pandas as pd
-import pytorch_lightning as pl
 import seaborn
 import torch
 import wandb
+from lightning import LightningModule
 from matplotlib import pyplot as plt
 from ray import tune
 from sklearn import metrics
@@ -15,36 +14,37 @@ from torch import nn, optim
 from torchmetrics import Accuracy
 from torchvision.transforms.functional import to_pil_image
 
-from tfm.constants import LABEL_TO_MOVEMENT, LABEL_TO_STRING
+from tfm.conf.schema import Configuration
+from tfm.constants import LABEL_TO_MOVEMENT, LABEL_TO_STRING, BLOCKS
 from tfm.model.base import Unet
 
 torch.set_float32_matmul_precision("medium")
 
 
-class Trainer(pl.LightningModule):
-    def __init__(self, config: Dict[str, Any]):
+class Trainer(LightningModule):
+    def __init__(self, config: Configuration):
         super().__init__()
         self.config = config
         self.model = Unet(
-            layers=config["layers"],
-            movements_layers=config["movements_layers"],
-            out_channels=config["out_channels"],
-            movements=config["movements"],
-            input_size=config["input_size"],
-            input_channels=config["input_channels"],
-            block=config["block"],
+            layers=config.model.layers,
+            movements_layers=config.model.movements_layers,
+            out_channels=config.model.out_channels,
+            input_channels=config.model.input_channels,
+            movements=config.model.actions,
+            input_size=config.dataset.input_size,
+            block=BLOCKS[config.model.block],
         )
-        self.lr = config["lr"]
-        self.weight_decay = config["weight_decay"]
-        self.accuracy = Accuracy(task="multiclass", num_classes=config["num_movement"])
-        self.dataset_name = config["dataset"]
+        self.lr = config.training.lr
+        self.weight_decay = config.training.weight_decay
+        self.accuracy = Accuracy(task="multiclass", num_classes=config.model.actions)
+        self.dataset_name = config.dataset.dataset
 
         self.loss_fn_images = nn.MSELoss(reduction="none")
         self.loss_fn_movements = nn.CrossEntropyLoss(reduction="none")
-        self.num_movement = config["num_movement"]
+        self.num_movement = config.model.actions
         self.confusion_matrix = np.zeros((self.num_movement, self.num_movement))
-        self.has_logger = config.get("log", True)
-        self.is_hyp = config.get("hyp", False)
+        self.has_logger = config.model.log
+        self.is_hyp = config.training.hyp
 
         self.val_loss = []
         self.val_acc = []
@@ -95,8 +95,8 @@ class Trainer(pl.LightningModule):
         if not self.has_logger:
             return
 
-        for key, value in self.config.items():
-            self.logger.experiment.config[key] = value  # type: ignore
+        # for key, value in self.config.items():
+        #     self.logger.experiment.config[key] = value  # type: ignore
 
     def configure_optimizers(self):
         optimizer = optim.AdamW(
@@ -131,7 +131,7 @@ class Trainer(pl.LightningModule):
 
         # Set not allowed to max value
         total_losses = images_losses + movements_losses
-        allowed = m[..., self.num_movement] == 1
+        allowed = m[..., -1] == 1
         total_losses[allowed] = 1e6
         movements_selected = total_losses.argmin(dim=-1)
         y_selected = y[batch_indices, movements_selected]

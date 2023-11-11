@@ -144,16 +144,17 @@ class BlocksWorldGenerator(BaseGenerator):
         color_increment = 200 // blocks
         self.colors = [(i + 1) * color_increment for i in range(blocks)]
 
-        self.height = max(self.crane_height + self.block_size, self.block_size * self.blocks)
-        self.width = self.cell_width * (blocks + cranes)
-        self.image_template = torch.zeros(
-            (self.height, self.width), dtype=torch.uint8
+        self.height = max(
+            self.crane_height + self.block_size, self.block_size * self.blocks
         )
+        self.width = self.cell_width * (blocks + cranes)
+        self.image_template = torch.zeros((self.height, self.width), dtype=torch.uint8)
         self.crane_block_start = self.height - self.crane_height
 
         for index in range(cranes):
             self.image_template[
-                :, index * self.cell_width : self.cell_width * (index + 1),
+                :,
+                index * self.cell_width : self.cell_width * (index + 1),
             ] = self.draw_crane()
 
     def init_state(self) -> Tensor:
@@ -539,9 +540,8 @@ class BlocksWorldGenerator(BaseGenerator):
             The list of block towers.
         """
         mapping = {}
-        top_blocks = (set(
-            range(self.blocks))
-            - set(state.tolist() + (state <= -2).nonzero().squeeze(-1).tolist())
+        top_blocks = set(range(self.blocks)) - set(
+            state.tolist() + (state <= -2).nonzero().squeeze(-1).tolist()
         )
         for block, behind in enumerate(state):
             behind = behind.item()
