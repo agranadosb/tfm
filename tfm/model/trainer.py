@@ -8,7 +8,7 @@ import torch
 import wandb
 from lightning import LightningModule
 from matplotlib import pyplot as plt
-from ray import tune
+from ray.train import report
 from sklearn import metrics
 from torch import nn, optim
 from torchmetrics import Accuracy
@@ -95,8 +95,8 @@ class Trainer(LightningModule):
         if not self.has_logger:
             return
 
-        # for key, value in self.config.items():
-        #     self.logger.experiment.config[key] = value  # type: ignore
+        for key, value in self.config.dict().items():
+            self.logger.experiment.config[key] = value
 
     def configure_optimizers(self):
         optimizer = optim.AdamW(
@@ -131,8 +131,8 @@ class Trainer(LightningModule):
 
         # Set not allowed to max value
         total_losses = images_losses + movements_losses
-        allowed = m[..., -1] == 1
-        total_losses[allowed] = 1e6
+        not_allowed = m[..., -1] == 1
+        total_losses[not_allowed] = 1e6
         movements_selected = total_losses.argmin(dim=-1)
         y_selected = y[batch_indices, movements_selected]
 
@@ -229,7 +229,7 @@ class Trainer(LightningModule):
         self.log("ptl/val_accuracy", torch.tensor(self.val_acc).mean())
 
         if self.is_hyp:
-            tune.report(val_loss=avg_loss.item())
+            report({"val_loss": avg_loss.item()})
 
         self.val_loss = []
         self.val_acc = []
